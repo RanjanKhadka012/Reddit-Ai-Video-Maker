@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+renders/
+work/
+
+.env
+*.log
+
+*.mp3
+*.wav
+*.ass
