@@ -1,7 +1,11 @@
+import { spawn } from "node:child_process";
+
 const REDDIT_BASE = "https://www.reddit.com";
 const OLD_REDDIT_BASE = "https://old.reddit.com";
 const REDDIT_API_BASE = "https://api.reddit.com";
 const REDDIT_OAUTH_BASE = "https://oauth.reddit.com";
+const OLD_REDDIT_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 RedditVideoMaker/1.0";
 
 const cleanText = (value = "") =>
   value
@@ -29,6 +33,40 @@ const stripTags = (html = "") =>
       .replace(/<\/p>/gi, "\n")
       .replace(/<[^>]+>/g, " ")
   );
+
+function psEscape(value = "") {
+  return String(value).replace(/'/g, "''");
+}
+
+function fetchHtmlWithPowerShell(url) {
+  const script = [
+    "$ProgressPreference = 'SilentlyContinue'",
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+    `$headers = @{ 'User-Agent' = '${psEscape(OLD_REDDIT_USER_AGENT)}'; 'Accept' = 'text/html,application/xhtml+xml' }`,
+    `$response = Invoke-WebRequest -Uri '${psEscape(url)}' -Headers $headers -UseBasicParsing -TimeoutSec 25`,
+    "$response.Content"
+  ].join("; ");
+
+  return new Promise((resolve, reject) => {
+    const child = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (data) => {
+      stdout += data.toString("utf8");
+    });
+    child.stderr.on("data", (data) => {
+      stderr += data.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0 && stdout.trim()) resolve(stdout);
+      else reject(new Error(stderr || `PowerShell web request exited with ${code}.`));
+    });
+  });
+}
 
 export function buildScript(post, targetMinutes = 10) {
   const title = cleanText(post.title);
@@ -128,18 +166,39 @@ async function fetchTopCommentStories({ post, userAgent, accessToken }) {
 }
 
 async function fetchOldRedditHtml(path, userAgent) {
-  const response = await fetch(`${OLD_REDDIT_BASE}${path}`, {
-    headers: {
-      Accept: "text/html",
-      "User-Agent": userAgent || "RedditVideoMaker/1.0"
-    }
-  });
+  const candidates = [
+    `${OLD_REDDIT_BASE}${path}`,
+    `${REDDIT_BASE}${path}`
+  ];
+  const userAgents = [
+    OLD_REDDIT_USER_AGENT,
+    userAgent,
+    "RedditVideoMaker/1.0"
+  ].filter(Boolean);
 
-  if (!response.ok) {
-    throw new Error(`old.reddit returned ${response.status}.`);
+  let lastStatus = 0;
+
+  for (const url of candidates) {
+    for (const agent of userAgents) {
+      const response = await fetch(url, {
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": agent
+        }
+      });
+
+      lastStatus = response.status;
+      if (response.ok) return response.text();
+    }
+
+    try {
+      return await fetchHtmlWithPowerShell(url);
+    } catch {
+      // Keep trying the remaining candidates.
+    }
   }
 
-  return response.text();
+  throw new Error(`Reddit web fallback returned ${lastStatus || "an error"}.`);
 }
 
 function parseOldRedditListing(html, subreddit, count) {
@@ -266,18 +325,23 @@ export async function fetchStories({ subreddit, sort, time, limit, userAgent, cl
   });
 
   if (!response.ok) {
-    const fallbackStories = await fetchStoriesFromOldReddit({
-      subreddit: safeSubreddit,
-      sort: safeSort,
-      time: safeTime,
-      limit: count,
-      userAgent
-    });
+    let fallbackStories = [];
+    try {
+      fallbackStories = await fetchStoriesFromOldReddit({
+        subreddit: safeSubreddit,
+        sort: safeSort,
+        time: safeTime,
+        limit: count,
+        userAgent
+      });
+    } catch {
+      fallbackStories = [];
+    }
 
     if (fallbackStories.length > 0) return fallbackStories;
 
     throw new Error(
-      `Reddit returned ${response.status} for r/${safeSubreddit}. Add Reddit OAuth credentials in .env or paste a story manually.`
+      `Reddit blocked both API and web fallback for r/${safeSubreddit}. Add Reddit OAuth credentials in .env or paste a story manually.`
     );
   }
 
