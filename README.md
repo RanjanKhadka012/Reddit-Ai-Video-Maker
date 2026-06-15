@@ -1,11 +1,23 @@
 # Reddit Video Maker
 
-Local app for making TikTok-style Reddit story videos:
+A local Windows desktop app that turns Reddit stories into captioned videos with TTS narration, animated backgrounds, and TikTok/YouTube layout options.
 
-- Fetches Reddit text posts and long top comments.
-- Generates narration with TikTok's commonly used unofficial TTS endpoint.
-- Burns readable captions onto a vertical 1080x1920 video.
-- Loops/crops your own parkour, Temple Run, Subway Surfers, or other gameplay clip as the background.
+## Features
+
+- Fetches Reddit stories and long top comments.
+- Falls back to old.reddit.com when Reddit JSON requests are blocked.
+- Supports manual story/script input.
+- TTS options:
+  - Google TTS fallback
+  - ElevenLabs API integration
+  - TikTok-style unofficial TTS fallback
+  - Windows speech fallback
+- Burns captions into the final video.
+- Supports TikTok/Shorts `9:16` output.
+- Supports YouTube `16:9` output.
+- Shows render progress while generating.
+- Includes an original animated runner background.
+- Lets you use your own `.mp4`, `.mov`, `.mkv`, or `.webm` background clips.
 
 ## Setup
 
@@ -21,27 +33,21 @@ Open:
 http://127.0.0.1:4141
 ```
 
-## Background Clips
+## Desktop App
 
-Put your own `.mp4`, `.mov`, `.mkv`, or `.webm` files here:
+Run the Electron desktop app locally:
 
-```text
-backgrounds/
+```powershell
+npm run desktop
 ```
 
-Then press **Refresh Backgrounds** in the app.
-
-Use clips you have rights to use. The app does not include parkour, Temple Run, or Subway Surfers footage because those clips can have copyright/platform issues.
-
-## Windows EXE
-
-Build a portable Windows app:
+Build a portable Windows `.exe`:
 
 ```powershell
 npm run dist:win
 ```
 
-The `.exe` is written to:
+The built app is written to:
 
 ```text
 release/
@@ -54,7 +60,50 @@ reddit-video-maker-data/backgrounds/
 reddit-video-maker-data/renders/
 ```
 
-## Rendered Videos
+## Background Clips
+
+The app includes `animated-runner.mp4` as a starter animated background.
+
+For better results, add your own gameplay or parkour clips to:
+
+```text
+backgrounds/
+```
+
+In the portable `.exe`, use:
+
+```text
+reddit-video-maker-data/backgrounds/
+```
+
+Use clips you have rights to use. The app does not include Subway Surfers, Temple Run, or Minecraft footage.
+
+## ElevenLabs
+
+Choose `ElevenLabs` in the Voice dropdown, then enter:
+
+- your ElevenLabs API key
+- a Voice ID
+
+The API key is stored locally in app/browser storage. Do not commit API keys to GitHub.
+
+## Reddit Access
+
+Reddit may block anonymous JSON/API requests. The app tries:
+
+1. Reddit JSON/API
+2. old.reddit.com HTML fallback
+3. manual script input
+
+For better reliability, create a Reddit app and add credentials to `.env`:
+
+```text
+REDDIT_CLIENT_ID=
+REDDIT_CLIENT_SECRET=
+REDDIT_USER_AGENT=RedditVideoMaker/1.0 by your_reddit_username
+```
+
+## Output
 
 Finished videos are saved under:
 
@@ -62,10 +111,12 @@ Finished videos are saved under:
 renders/
 ```
 
-The app also shows a preview and download button after rendering.
+In the portable app, finished videos are saved under:
+
+```text
+reddit-video-maker-data/renders/
+```
 
 ## Notes
 
-Reddit asks API clients to use a unique, descriptive User-Agent. Edit `.env` and set `REDDIT_USER_AGENT` to include your Reddit username or project name.
-
-TikTok does not provide a stable public TTS API for this workflow. If the unofficial endpoint stops working, the rest of the app can stay the same, but `server/tts.js` will need a different voice provider.
+This project is intended for local content generation and experimentation. Respect platform terms, creator rights, Reddit content rights, and TTS provider terms when publishing generated videos.
