@@ -23,6 +23,7 @@ function App() {
   const [background, setBackground] = React.useState("");
   const [voice, setVoice] = React.useState("google-natural");
   const [layout, setLayout] = React.useState("tiktok");
+  const [visualMode, setVisualMode] = React.useState("gameplay");
   const [elevenLabsApiKey, setElevenLabsApiKey] = React.useState(() => localStorage.getItem("elevenLabsApiKey") || "");
   const [elevenLabsVoiceId, setElevenLabsVoiceId] = React.useState(
     () => localStorage.getItem("elevenLabsVoiceId") || "21m00Tcm4TlvDq8ikWAM"
@@ -94,7 +95,7 @@ function App() {
   }
 
   async function renderStory(storyToRender) {
-    if (!background) {
+    if (visualMode !== "reddit-card" && !background) {
       setStatus("Put an MP4/MOV/WebM background in the backgrounds folder, then refresh.");
       return;
     }
@@ -119,6 +120,7 @@ function App() {
           voice,
           targetMinutes,
           layout,
+          visualMode,
           elevenLabsApiKey: voice === "elevenlabs" ? elevenLabsApiKey.trim() : "",
           elevenLabsVoiceId: voice === "elevenlabs" ? elevenLabsVoiceId.trim() : ""
         })
@@ -267,8 +269,19 @@ function App() {
                 <strong>{selectedStory ? selectedStory.title : "No story selected"}</strong>
               </div>
               <label>
+                Visual mode
+                <select value={visualMode} onChange={(event) => setVisualMode(event.target.value)}>
+                  <option value="gameplay">Gameplay / animated background</option>
+                  <option value="reddit-card">Reddit card + captions only</option>
+                </select>
+              </label>
+              <label>
                 Background
-                <select value={background} onChange={(event) => setBackground(event.target.value)}>
+                <select
+                  value={background}
+                  onChange={(event) => setBackground(event.target.value)}
+                  disabled={visualMode === "reddit-card"}
+                >
                   {backgrounds.length === 0 ? (
                     <option value="">No backgrounds found</option>
                   ) : (
@@ -284,7 +297,11 @@ function App() {
                 <RefreshCw size={18} />
                 Refresh Backgrounds
               </button>
-              <p className="hint">Use your own parkour or gameplay MP4 for the best look. The sample is only a clean starter loop.</p>
+              <p className="hint">
+                {visualMode === "reddit-card"
+                  ? "This mode skips gameplay and renders a Reddit-style card with captions."
+                  : "Use your own parkour or gameplay MP4 for the best look. The sample is only a clean starter loop."}
+              </p>
             </div>
 
             <div className="panel-section manual">
@@ -345,8 +362,8 @@ function App() {
                 Target length
                 <input
                   type="range"
-                  min="2"
-                  max="3"
+                  min="0.5"
+                  max="10"
                   step="0.1"
                   value={targetMinutes}
                   onChange={(event) => setTargetMinutes(event.target.value)}

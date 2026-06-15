@@ -53,13 +53,17 @@ app.get("/api/reddit", async (request, response, next) => {
 
 app.post("/api/render", async (request, response, next) => {
   try {
-    const { story, background, voice, targetMinutes, layout, elevenLabsApiKey, elevenLabsVoiceId } = request.body;
+    const { story, background, voice, targetMinutes, layout, visualMode, elevenLabsApiKey, elevenLabsVoiceId } = request.body;
     if (!story?.script) throw new Error("Choose a story before rendering.");
-    if (!background) throw new Error("Add a background clip in the backgrounds folder first.");
+    const useRedditCardOnly = visualMode === "reddit-card";
+    if (!useRedditCardOnly && !background) throw new Error("Add a background clip in the backgrounds folder first.");
 
-    const safeBackground = path.basename(background);
-    const backgroundPath = path.join(backgroundsDir, safeBackground);
-    await fs.access(backgroundPath);
+    let backgroundPath = null;
+    if (!useRedditCardOnly) {
+      const safeBackground = path.basename(background);
+      backgroundPath = path.join(backgroundsDir, safeBackground);
+      await fs.access(backgroundPath);
+    }
 
     const jobId = nanoid(8);
     const jobDir = path.join(rendersDir, jobId);
@@ -85,6 +89,7 @@ app.post("/api/render", async (request, response, next) => {
 
     runRenderJob({
       job,
+      story,
       script,
       audioPath,
       captionsPath,
@@ -93,6 +98,7 @@ app.post("/api/render", async (request, response, next) => {
       voice,
       targetMinutes,
       layout,
+      visualMode,
       elevenLabsApiKey,
       elevenLabsVoiceId
     });
@@ -112,6 +118,7 @@ app.get("/api/jobs/:jobId", (request, response) => {
 
 async function runRenderJob({
   job,
+  story,
   script,
   audioPath,
   captionsPath,
@@ -120,6 +127,7 @@ async function runRenderJob({
   voice,
   targetMinutes,
   layout,
+  visualMode,
   elevenLabsApiKey,
   elevenLabsVoiceId
 }) {
@@ -137,8 +145,8 @@ async function runRenderJob({
     job.stage = "Measuring narration...";
     job.progress = 0.28;
     const audioSeconds = await getDuration(audioPath);
-    const requestedSeconds = Math.round(Math.min(180, Math.max(120, Number(targetMinutes || 2.4) * 60)));
-    const durationSeconds = Math.min(180, Math.max(30, Math.min(audioSeconds || requestedSeconds, requestedSeconds)));
+    const requestedSeconds = Math.round(Math.min(600, Math.max(30, Number(targetMinutes || 2.4) * 60)));
+    const durationSeconds = Math.min(600, Math.max(30, Math.min(audioSeconds || requestedSeconds, requestedSeconds)));
 
     job.stage = "Writing captions...";
     job.progress = 0.34;
@@ -146,7 +154,16 @@ async function runRenderJob({
       script,
       outputPath: captionsPath,
       totalSeconds: durationSeconds,
-      layout: layout || "tiktok"
+      layout: layout || "tiktok",
+      card:
+        visualMode === "reddit-card"
+          ? {
+              title: story.title || "Reddit Story",
+              body: story.selftext || script,
+              subreddit: story.subreddit || "reddit",
+              source: story.source || "screenshot-style"
+            }
+          : null
     });
 
     job.stage = "Rendering video...";

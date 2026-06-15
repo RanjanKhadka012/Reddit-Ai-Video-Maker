@@ -43,6 +43,24 @@ function layoutSpec(layout = "tiktok") {
   };
 }
 
+function wrapText(text, maxChars) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+
+  for (const word of words) {
+    if ((line + " " + word).trim().length > maxChars && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = (line + " " + word).trim();
+    }
+  }
+
+  if (line) lines.push(line);
+  return lines;
+}
+
 export async function listBackgrounds(backgroundDir) {
   const entries = await fs.readdir(backgroundDir, { withFileTypes: true });
   return entries
@@ -102,33 +120,64 @@ function assTime(seconds) {
   return `${h}:${m}:${s}.${cs}`;
 }
 
+function lineWeight(text) {
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const pauses = (text.match(/[,.!?;:]/g) || []).length * 0.42;
+  return Math.max(1, words + pauses);
+}
+
 function captionLines(script, totalSeconds) {
   const words = script.split(/\s+/).filter(Boolean);
   const lines = [];
-  const wordsPerLine = 8;
-  const lineDuration = Math.max(1.8, totalSeconds / Math.ceil(words.length / wordsPerLine));
+  const wordsPerLine = 7;
 
   for (let i = 0; i < words.length; i += wordsPerLine) {
-    const start = (i / wordsPerLine) * lineDuration;
-    const end = Math.min(totalSeconds, start + lineDuration);
     lines.push({
-      start,
-      end,
       text: words.slice(i, i + wordsPerLine).join(" ")
     });
+  }
+
+  const totalWeight = lines.reduce((sum, line) => sum + lineWeight(line.text), 0);
+  let cursor = 0;
+
+  for (const line of lines) {
+    const duration = Math.max(1.05, (lineWeight(line.text) / totalWeight) * totalSeconds);
+    line.start = cursor;
+    line.end = Math.min(totalSeconds, cursor + duration);
+    cursor = line.end;
   }
 
   return lines;
 }
 
-export async function writeAssCaptions({ script, outputPath, totalSeconds, layout }) {
+function redditCardEvents({ card, totalSeconds, layout }) {
+  if (!card) return "";
+  const isYoutube = layout === "youtube";
+  const maxTitle = isYoutube ? 58 : 32;
+  const maxBody = isYoutube ? 72 : 38;
+  const titleLines = wrapText(card.title || "Reddit Story", maxTitle).slice(0, 3);
+  const bodyLines = wrapText(card.body || card.selftext || "", maxBody).slice(0, isYoutube ? 7 : 9);
+  const meta = `r/${card.subreddit || "reddit"}  •  ${card.source || "story"}`;
+  const cardText = [meta, "", ...titleLines, "", ...bodyLines].filter((line, index, all) => {
+    if (line !== "") return true;
+    return all[index - 1] !== "" && all[index + 1] !== "";
+  });
+
+  return `Dialogue: 0,0:00:00.00,${assTime(totalSeconds)},RedditCard,,0,0,0,,${assEscape(cardText.join("\\N"))}`;
+}
+
+export async function writeAssCaptions({ script, outputPath, totalSeconds, layout, card }) {
   const spec = layoutSpec(layout);
-  const events = captionLines(script, totalSeconds)
+  const cardEvent = redditCardEvents({ card, totalSeconds, layout });
+  const captionEvents = captionLines(script, totalSeconds)
     .map(
       (line) =>
-        `Dialogue: 0,${assTime(line.start)},${assTime(line.end)},Caption,,0,0,0,,${assEscape(line.text)}`
+        `Dialogue: 1,${assTime(line.start)},${assTime(line.end)},Caption,,0,0,0,,${assEscape(line.text)}`
     )
     .join("\n");
+  const events = [cardEvent, captionEvents].filter(Boolean).join("\n");
+  const cardFontSize = layout === "youtube" ? 38 : 44;
+  const cardMarginV = layout === "youtube" ? 70 : 150;
 
   const content = `[Script Info]
 ScriptType: v4.00+
@@ -138,6 +187,7 @@ PlayResY: ${spec.height}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Caption,Arial,${spec.fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H7A000000,-1,0,0,0,100,100,0,0,1,5,2,2,80,80,${spec.marginV},1
+Style: RedditCard,Arial,${cardFontSize},&H001A1A1B,&H000000FF,&H00FFFFFF,&H00FFFFFF,0,0,0,0,100,100,0,0,3,14,0,8,${layout === "youtube" ? 360 : 90},${layout === "youtube" ? 360 : 90},${cardMarginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -158,12 +208,13 @@ export async function renderVideo({ backgroundPath, audioPath, captionPath, outp
     .filter(Boolean)
     .join(",");
 
+  const inputArgs = backgroundPath
+    ? ["-stream_loop", "-1", "-i", backgroundPath]
+    : ["-f", "lavfi", "-i", `color=c=0xf2f4f7:s=${spec.width}x${spec.height}:r=30`];
+
   const args = [
     "-y",
-    "-stream_loop",
-    "-1",
-    "-i",
-    backgroundPath,
+    ...inputArgs,
     "-i",
     audioPath,
     "-t",

@@ -30,7 +30,7 @@ const stripTags = (html = "") =>
       .replace(/<[^>]+>/g, " ")
   );
 
-export function buildScript(post, targetMinutes = 2.4) {
+export function buildScript(post, targetMinutes = 10) {
   const title = cleanText(post.title);
   const body = cleanText(post.selftext || "");
   const raw = `${title}. ${body}`.trim();
