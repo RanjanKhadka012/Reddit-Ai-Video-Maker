@@ -22,6 +22,14 @@ function App() {
   const [backgrounds, setBackgrounds] = React.useState([]);
   const [background, setBackground] = React.useState("");
   const [comicPanels, setComicPanels] = React.useState([]);
+  const [panelSource, setPanelSource] = React.useState("folder");
+  const [imageStyle, setImageStyle] = React.useState("comic");
+  const [panelCount, setPanelCount] = React.useState(8);
+  const [comfyUrl, setComfyUrl] = React.useState(() => localStorage.getItem("comfyUrl") || "http://127.0.0.1:8188");
+  const [comfyCheckpoint, setComfyCheckpoint] = React.useState(() => localStorage.getItem("comfyCheckpoint") || "");
+  const [comfySteps, setComfySteps] = React.useState(18);
+  const [comfyCheckpoints, setComfyCheckpoints] = React.useState([]);
+  const [comfyStatus, setComfyStatus] = React.useState("");
   const [voice, setVoice] = React.useState("google-natural");
   const [layout, setLayout] = React.useState("tiktok");
   const [visualMode, setVisualMode] = React.useState("gameplay");
@@ -54,6 +62,25 @@ function App() {
   async function loadComicPanels() {
     const payload = await api("/api/comic-panels");
     setComicPanels(payload.panels);
+  }
+
+  async function checkComfyUi() {
+    setBusy(true);
+    setComfyStatus("Checking ComfyUI...");
+    setStatus("Checking ComfyUI...");
+    try {
+      const params = new URLSearchParams({ url: comfyUrl });
+      const payload = await api(`/api/comfyui/status?${params}`);
+      setComfyCheckpoints(payload.checkpoints || []);
+      if (!comfyCheckpoint && payload.checkpoints?.length) setComfyCheckpoint(payload.checkpoints[0]);
+      setComfyStatus(`Connected. ${payload.checkpoints?.length || 0} checkpoint(s) found.`);
+      setStatus("ComfyUI connected.");
+    } catch (error) {
+      setComfyStatus(error.message);
+      setStatus(`ComfyUI not ready: ${error.message}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function fetchStories() {
@@ -101,8 +128,13 @@ function App() {
   }
 
   async function renderStory(storyToRender) {
-    if (visualMode === "comic" && comicPanels.length === 0) {
+    if (visualMode === "comic" && panelSource === "folder" && comicPanels.length === 0) {
       setStatus("Add PNG/JPG/WebP comic panels to the comic-panels folder, then refresh.");
+      return;
+    }
+
+    if (visualMode === "comic" && panelSource === "comfyui" && !comfyCheckpoint.trim()) {
+      setStatus("Check ComfyUI and choose a checkpoint before rendering with local ComfyUI.");
       return;
     }
 
@@ -132,6 +164,12 @@ function App() {
           targetMinutes,
           layout,
           visualMode,
+          panelSource,
+          imageStyle,
+          panelCount,
+          comfyUrl,
+          comfyCheckpoint,
+          comfySteps,
           elevenLabsApiKey: voice === "elevenlabs" ? elevenLabsApiKey.trim() : "",
           elevenLabsVoiceId: voice === "elevenlabs" ? elevenLabsVoiceId.trim() : ""
         })
@@ -197,6 +235,14 @@ function App() {
   React.useEffect(() => {
     localStorage.setItem("elevenLabsVoiceId", elevenLabsVoiceId);
   }, [elevenLabsVoiceId]);
+
+  React.useEffect(() => {
+    localStorage.setItem("comfyUrl", comfyUrl);
+  }, [comfyUrl]);
+
+  React.useEffect(() => {
+    localStorage.setItem("comfyCheckpoint", comfyCheckpoint);
+  }, [comfyCheckpoint]);
 
   return (
     <main className="app-shell">
@@ -312,12 +358,88 @@ function App() {
               </button>
               {visualMode === "comic" ? (
                 <div className="asset-note">
-                  <strong>{comicPanels.length} comic panel{comicPanels.length === 1 ? "" : "s"} found</strong>
-                  <span>Use numbered PNG, JPG, or WebP panels in the comic-panels folder.</span>
-                  <button className="secondary full" onClick={loadComicPanels} disabled={busy}>
-                    <RefreshCw size={18} />
-                    Refresh Comic Panels
-                  </button>
+                  <label>
+                    Panel source
+                    <select value={panelSource} onChange={(event) => setPanelSource(event.target.value)}>
+                      <option value="folder">Use comic-panels folder</option>
+                      <option value="pollinations">Generate with Pollinations</option>
+                      <option value="comfyui">Generate with local ComfyUI</option>
+                    </select>
+                  </label>
+                  {panelSource === "folder" ? (
+                    <>
+                      <strong>{comicPanels.length} comic panel{comicPanels.length === 1 ? "" : "s"} found</strong>
+                      <span>Use numbered PNG, JPG, or WebP panels in the comic-panels folder.</span>
+                      <button className="secondary full" onClick={loadComicPanels} disabled={busy}>
+                        <RefreshCw size={18} />
+                        Refresh Comic Panels
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <label>
+                        Image style
+                        <select value={imageStyle} onChange={(event) => setImageStyle(event.target.value)}>
+                          <option value="comic">Comic book</option>
+                          <option value="stickman">MS Paint stickman</option>
+                          <option value="horror">Horror comic</option>
+                          <option value="webtoon">Anime / webtoon</option>
+                          <option value="cartoon">Simple cartoon</option>
+                        </select>
+                      </label>
+                      <label>
+                        Panels
+                        <input
+                          type="range"
+                          min="2"
+                          max="24"
+                          step="1"
+                          value={panelCount}
+                          onChange={(event) => setPanelCount(event.target.value)}
+                        />
+                        <span className="range-readout">{panelCount} panels</span>
+                      </label>
+                    </>
+                  )}
+                  {panelSource === "comfyui" ? (
+                    <div className="comfy-settings">
+                      <label>
+                        ComfyUI URL
+                        <input value={comfyUrl} onChange={(event) => setComfyUrl(event.target.value)} />
+                      </label>
+                      <button className="secondary full" onClick={checkComfyUi} disabled={busy}>
+                        <RefreshCw size={18} />
+                        Check ComfyUI
+                      </button>
+                      <label>
+                        Checkpoint
+                        <select value={comfyCheckpoint} onChange={(event) => setComfyCheckpoint(event.target.value)}>
+                          {comfyCheckpoints.length === 0 ? (
+                            <option value={comfyCheckpoint}>{comfyCheckpoint || "Check ComfyUI first"}</option>
+                          ) : (
+                            comfyCheckpoints.map((file) => (
+                              <option key={file} value={file}>
+                                {file}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </label>
+                      <label>
+                        Steps
+                        <input
+                          type="range"
+                          min="8"
+                          max="40"
+                          step="1"
+                          value={comfySteps}
+                          onChange={(event) => setComfySteps(event.target.value)}
+                        />
+                        <span className="range-readout">{comfySteps} steps</span>
+                      </label>
+                      <span>{comfyStatus || "Start ComfyUI locally, then check connection."}</span>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               <p className="hint">

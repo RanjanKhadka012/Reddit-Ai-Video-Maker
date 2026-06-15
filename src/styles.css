@@ -319,6 +319,13 @@ textarea {
   line-height: 1.4;
 }
 
+.comfy-settings {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #d5dce5;
+  padding-top: 10px;
+}
+
 .elevenlabs-settings {
   display: grid;
   gap: 10px;

@@ -18,6 +18,7 @@ A local Windows desktop app that turns Reddit stories into captioned videos with
 - Shows render progress while generating.
 - Includes an original animated runner background.
 - Includes comic story mode with animated image panels and big keyword captions.
+- Can generate fresh comic panels per story with Pollinations or local ComfyUI.
 - Lets you use your own `.mp4`, `.mov`, `.mkv`, or `.webm` background clips.
 
 ## Setup
@@ -95,6 +96,24 @@ reddit-video-maker-data/comic-panels/
 ```
 
 Supported panel formats are `.png`, `.jpg`, `.jpeg`, and `.webp`. The app uses the files in filename order, animates them with a subtle pan/zoom, then burns large keyword captions over the video.
+
+Comic mode has three panel sources:
+
+- `Use comic-panels folder`: uses your local reusable image folder.
+- `Generate with Pollinations`: creates new panels from the story with a free public image API.
+- `Generate with local ComfyUI`: creates new panels through a ComfyUI server running on your PC.
+
+## Local ComfyUI
+
+Install and start ComfyUI separately, then leave it running at:
+
+```text
+http://127.0.0.1:8188
+```
+
+In the app, choose `Generate with local ComfyUI`, click `Check ComfyUI`, then pick a checkpoint. The app sends a basic text-to-image workflow to ComfyUI, saves generated panels inside the render job folder, and uses those panels for the final video.
+
+The `.exe` does not bundle ComfyUI or model files because those can be many gigabytes. This keeps the app portable while still letting it use local AI generation when ComfyUI is available.
 
 ## ElevenLabs
 

@@ -7,6 +7,13 @@ import { nanoid } from "nanoid";
 import { fetchStories } from "./reddit.js";
 import { synthesizeTikTokTts } from "./tts.js";
 import {
+  createScenePrompts,
+  generateComfyPanels,
+  generatePollinationsPanels,
+  getComfyCheckpoints,
+  getComfyStatus
+} from "./image-panels.js";
+import {
   createComicPanelVideo,
   getDuration,
   listBackgrounds,
@@ -47,6 +54,16 @@ app.get("/api/comic-panels", async (_request, response, next) => {
   }
 });
 
+app.get("/api/comfyui/status", async (request, response, next) => {
+  try {
+    const url = String(request.query.url || "http://127.0.0.1:8188");
+    const [status, checkpoints] = await Promise.all([getComfyStatus(url), getComfyCheckpoints(url)]);
+    response.json({ ok: true, status, checkpoints });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/reddit", async (request, response, next) => {
   try {
     const stories = await fetchStories({
@@ -68,10 +85,26 @@ app.get("/api/reddit", async (request, response, next) => {
 
 app.post("/api/render", async (request, response, next) => {
   try {
-    const { story, background, voice, targetMinutes, layout, visualMode, elevenLabsApiKey, elevenLabsVoiceId } = request.body;
+    const {
+      story,
+      background,
+      voice,
+      targetMinutes,
+      layout,
+      visualMode,
+      panelSource,
+      imageStyle,
+      panelCount,
+      comfyUrl,
+      comfyCheckpoint,
+      comfySteps,
+      elevenLabsApiKey,
+      elevenLabsVoiceId
+    } = request.body;
     if (!story?.script) throw new Error("Choose a story before rendering.");
     const useRedditCardOnly = visualMode === "reddit-card";
     const useComicPanels = visualMode === "comic";
+    const useGeneratedPanels = useComicPanels && panelSource && panelSource !== "folder";
     if (!useRedditCardOnly && !useComicPanels && !background) {
       throw new Error("Add a background clip in the backgrounds folder first.");
     }
@@ -81,7 +114,7 @@ app.post("/api/render", async (request, response, next) => {
       const safeBackground = path.basename(background);
       backgroundPath = path.join(backgroundsDir, safeBackground);
       await fs.access(backgroundPath);
-    } else if (useComicPanels) {
+    } else if (useComicPanels && !useGeneratedPanels) {
       const panels = await listComicPanels(comicPanelsDir);
       if (!panels.length) throw new Error("Add PNG/JPG/WebP comic panels to the comic-panels folder first.");
     }
@@ -123,6 +156,12 @@ app.post("/api/render", async (request, response, next) => {
       targetMinutes,
       layout,
       visualMode,
+      panelSource,
+      imageStyle,
+      panelCount,
+      comfyUrl,
+      comfyCheckpoint,
+      comfySteps,
       elevenLabsApiKey,
       elevenLabsVoiceId
     });
@@ -154,6 +193,12 @@ async function runRenderJob({
   targetMinutes,
   layout,
   visualMode,
+  panelSource,
+  imageStyle,
+  panelCount,
+  comfyUrl,
+  comfyCheckpoint,
+  comfySteps,
   elevenLabsApiKey,
   elevenLabsVoiceId
 }) {
@@ -195,24 +240,59 @@ async function runRenderJob({
 
     let renderBackgroundPath = backgroundPath;
     if (visualMode === "comic") {
-      job.stage = "Preparing comic panels...";
+      job.stage = panelSource && panelSource !== "folder" ? "Generating comic panels..." : "Preparing comic panels...";
       job.progress = 0.38;
-      const panelFiles = await listComicPanels(comicPanelsDir);
+      let panelPaths = [];
+      if (panelSource === "pollinations" || panelSource === "comfyui") {
+        const prompts = createScenePrompts({
+          script,
+          panelCount: Math.max(2, Math.min(24, Number(panelCount) || 8)),
+          style: imageStyle || "comic"
+        });
+        const generatedDir = path.join(jobDir, "generated-panels");
+        const generatorProgress = (value) => {
+          job.progress = Math.max(job.progress, 0.38 + value * 0.28);
+        };
+        panelPaths =
+          panelSource === "comfyui"
+            ? await generateComfyPanels({
+                prompts,
+                outputDir: generatedDir,
+                layout: layout || "tiktok",
+                comfyUrl,
+                checkpoint: comfyCheckpoint,
+                steps: comfySteps,
+                onProgress: generatorProgress
+              })
+            : await generatePollinationsPanels({
+                prompts,
+                outputDir: generatedDir,
+                layout: layout || "tiktok",
+                onProgress: generatorProgress
+              });
+      } else {
+        const panelFiles = await listComicPanels(comicPanelsDir);
+        panelPaths = panelFiles.map((file) => path.join(comicPanelsDir, file));
+      }
+
+      job.stage = "Preparing comic panels...";
       await createComicPanelVideo({
-        panelPaths: panelFiles.map((file) => path.join(comicPanelsDir, file)),
+        panelPaths,
         outputPath: comicBackgroundPath,
         durationSeconds,
         layout: layout || "tiktok",
         workDir: jobDir,
         onProgress: (value) => {
-          job.progress = Math.max(job.progress, 0.38 + value * 0.18);
+          const start = panelSource && panelSource !== "folder" ? 0.66 : 0.38;
+          const span = panelSource && panelSource !== "folder" ? 0.1 : 0.18;
+          job.progress = Math.max(job.progress, start + value * span);
         }
       });
       renderBackgroundPath = comicBackgroundPath;
     }
 
     job.stage = "Rendering video...";
-    job.progress = visualMode === "comic" ? 0.58 : 0.4;
+    job.progress = visualMode === "comic" ? (panelSource && panelSource !== "folder" ? 0.76 : 0.58) : 0.4;
     await renderVideo({
       backgroundPath: renderBackgroundPath,
       audioPath,
@@ -221,8 +301,8 @@ async function runRenderJob({
       durationSeconds,
       layout: layout || "tiktok",
       onProgress: (value) => {
-        const start = visualMode === "comic" ? 0.58 : 0.4;
-        const span = visualMode === "comic" ? 0.4 : 0.58;
+        const start = visualMode === "comic" ? (panelSource && panelSource !== "folder" ? 0.76 : 0.58) : 0.4;
+        const span = visualMode === "comic" ? (panelSource && panelSource !== "folder" ? 0.22 : 0.4) : 0.58;
         job.progress = Math.max(job.progress, start + value * span);
       }
     });
