@@ -12,16 +12,23 @@ process.env.PORT = process.env.PORT || "4141";
 
 function ensurePortableFolders() {
   const backgrounds = path.join(dataRoot, "backgrounds");
+  const comicPanels = path.join(dataRoot, "comic-panels");
   const renders = path.join(dataRoot, "renders");
   fs.mkdirSync(backgrounds, { recursive: true });
+  fs.mkdirSync(comicPanels, { recursive: true });
   fs.mkdirSync(renders, { recursive: true });
 
   if (isPackaged) {
-    const bundledBackgrounds = path.join(process.resourcesPath, "backgrounds");
-    if (fs.existsSync(bundledBackgrounds)) {
-      for (const entry of fs.readdirSync(bundledBackgrounds)) {
-        const source = path.join(bundledBackgrounds, entry);
-        const target = path.join(backgrounds, entry);
+    const bundledFolders = [
+      { source: path.join(process.resourcesPath, "backgrounds"), target: backgrounds },
+      { source: path.join(process.resourcesPath, "comic-panels"), target: comicPanels }
+    ];
+
+    for (const folder of bundledFolders) {
+      if (!fs.existsSync(folder.source)) continue;
+      for (const entry of fs.readdirSync(folder.source)) {
+        const source = path.join(folder.source, entry);
+        const target = path.join(folder.target, entry);
         if (!fs.existsSync(target) && fs.statSync(source).isFile()) {
           fs.copyFileSync(source, target);
         }

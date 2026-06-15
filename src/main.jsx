@@ -21,6 +21,7 @@ function App() {
   const [selectedStory, setSelectedStory] = React.useState(null);
   const [backgrounds, setBackgrounds] = React.useState([]);
   const [background, setBackground] = React.useState("");
+  const [comicPanels, setComicPanels] = React.useState([]);
   const [voice, setVoice] = React.useState("google-natural");
   const [layout, setLayout] = React.useState("tiktok");
   const [visualMode, setVisualMode] = React.useState("gameplay");
@@ -48,6 +49,11 @@ function App() {
     const payload = await api("/api/backgrounds");
     setBackgrounds(payload.backgrounds);
     if (!background && payload.backgrounds.length) setBackground(payload.backgrounds[0]);
+  }
+
+  async function loadComicPanels() {
+    const payload = await api("/api/comic-panels");
+    setComicPanels(payload.panels);
   }
 
   async function fetchStories() {
@@ -95,7 +101,12 @@ function App() {
   }
 
   async function renderStory(storyToRender) {
-    if (visualMode !== "reddit-card" && !background) {
+    if (visualMode === "comic" && comicPanels.length === 0) {
+      setStatus("Add PNG/JPG/WebP comic panels to the comic-panels folder, then refresh.");
+      return;
+    }
+
+    if (visualMode !== "reddit-card" && visualMode !== "comic" && !background) {
       setStatus("Put an MP4/MOV/WebM background in the backgrounds folder, then refresh.");
       return;
     }
@@ -176,6 +187,7 @@ function App() {
 
   React.useEffect(() => {
     loadBackgrounds().catch((error) => setStatus(error.message));
+    loadComicPanels().catch((error) => setStatus(error.message));
   }, []);
 
   React.useEffect(() => {
@@ -273,6 +285,7 @@ function App() {
                 <select value={visualMode} onChange={(event) => setVisualMode(event.target.value)}>
                   <option value="gameplay">Gameplay / animated background</option>
                   <option value="reddit-card">Reddit card + captions only</option>
+                  <option value="comic">Comic panels + keyword captions</option>
                 </select>
               </label>
               <label>
@@ -280,7 +293,7 @@ function App() {
                 <select
                   value={background}
                   onChange={(event) => setBackground(event.target.value)}
-                  disabled={visualMode === "reddit-card"}
+                  disabled={visualMode === "reddit-card" || visualMode === "comic"}
                 >
                   {backgrounds.length === 0 ? (
                     <option value="">No backgrounds found</option>
@@ -297,8 +310,20 @@ function App() {
                 <RefreshCw size={18} />
                 Refresh Backgrounds
               </button>
+              {visualMode === "comic" ? (
+                <div className="asset-note">
+                  <strong>{comicPanels.length} comic panel{comicPanels.length === 1 ? "" : "s"} found</strong>
+                  <span>Use numbered PNG, JPG, or WebP panels in the comic-panels folder.</span>
+                  <button className="secondary full" onClick={loadComicPanels} disabled={busy}>
+                    <RefreshCw size={18} />
+                    Refresh Comic Panels
+                  </button>
+                </div>
+              ) : null}
               <p className="hint">
-                {visualMode === "reddit-card"
+                {visualMode === "comic"
+                  ? "Comic mode animates still panels and uses bold keyword captions like story-summary videos."
+                  : visualMode === "reddit-card"
                   ? "This mode skips gameplay and renders a Reddit-style card with captions."
                   : "Use your own parkour or gameplay MP4 for the best look. The sample is only a clean starter loop."}
               </p>

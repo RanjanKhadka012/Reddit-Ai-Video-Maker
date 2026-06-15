@@ -299,6 +299,26 @@ textarea {
   line-height: 1.4;
 }
 
+.asset-note {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d5dce5;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.asset-note strong {
+  color: #1d2731;
+  font-size: 14px;
+}
+
+.asset-note span {
+  color: #65707c;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .elevenlabs-settings {
   display: grid;
   gap: 10px;

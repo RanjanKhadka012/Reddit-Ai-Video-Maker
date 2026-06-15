@@ -6,8 +6,15 @@ import fs from "node:fs/promises";
 import { nanoid } from "nanoid";
 import { fetchStories } from "./reddit.js";
 import { synthesizeTikTokTts } from "./tts.js";
-import { getDuration, listBackgrounds, renderVideo, writeAssCaptions } from "./video.js";
-import { backgroundsDir, distDir, ensureDataDirs, rendersDir } from "./paths.js";
+import {
+  createComicPanelVideo,
+  getDuration,
+  listBackgrounds,
+  listComicPanels,
+  renderVideo,
+  writeAssCaptions
+} from "./video.js";
+import { backgroundsDir, comicPanelsDir, distDir, ensureDataDirs, rendersDir } from "./paths.js";
 
 const app = express();
 const port = Number(process.env.PORT || 4141);
@@ -27,6 +34,14 @@ app.get("/api/health", (_request, response) => {
 app.get("/api/backgrounds", async (_request, response, next) => {
   try {
     response.json({ backgrounds: await listBackgrounds(backgroundsDir) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/comic-panels", async (_request, response, next) => {
+  try {
+    response.json({ panels: await listComicPanels(comicPanelsDir) });
   } catch (error) {
     next(error);
   }
@@ -56,13 +71,19 @@ app.post("/api/render", async (request, response, next) => {
     const { story, background, voice, targetMinutes, layout, visualMode, elevenLabsApiKey, elevenLabsVoiceId } = request.body;
     if (!story?.script) throw new Error("Choose a story before rendering.");
     const useRedditCardOnly = visualMode === "reddit-card";
-    if (!useRedditCardOnly && !background) throw new Error("Add a background clip in the backgrounds folder first.");
+    const useComicPanels = visualMode === "comic";
+    if (!useRedditCardOnly && !useComicPanels && !background) {
+      throw new Error("Add a background clip in the backgrounds folder first.");
+    }
 
     let backgroundPath = null;
-    if (!useRedditCardOnly) {
+    if (!useRedditCardOnly && !useComicPanels) {
       const safeBackground = path.basename(background);
       backgroundPath = path.join(backgroundsDir, safeBackground);
       await fs.access(backgroundPath);
+    } else if (useComicPanels) {
+      const panels = await listComicPanels(comicPanelsDir);
+      if (!panels.length) throw new Error("Add PNG/JPG/WebP comic panels to the comic-panels folder first.");
     }
 
     const jobId = nanoid(8);
@@ -85,6 +106,7 @@ app.post("/api/render", async (request, response, next) => {
     const audioPath = path.join(jobDir, "voice.mp3");
     const captionsPath = path.join(jobDir, "captions.ass");
     const outputPath = path.join(jobDir, "reddit-video.mp4");
+    const comicBackgroundPath = path.join(jobDir, "comic-background.mp4");
     const script = story.script;
 
     runRenderJob({
@@ -94,6 +116,8 @@ app.post("/api/render", async (request, response, next) => {
       audioPath,
       captionsPath,
       outputPath,
+      comicBackgroundPath,
+      jobDir,
       backgroundPath,
       voice,
       targetMinutes,
@@ -123,6 +147,8 @@ async function runRenderJob({
   audioPath,
   captionsPath,
   outputPath,
+  comicBackgroundPath,
+  jobDir,
   backgroundPath,
   voice,
   targetMinutes,
@@ -155,6 +181,7 @@ async function runRenderJob({
       outputPath: captionsPath,
       totalSeconds: durationSeconds,
       layout: layout || "tiktok",
+      captionMode: visualMode === "comic" ? "keyword" : "full",
       card:
         visualMode === "reddit-card"
           ? {
@@ -166,17 +193,37 @@ async function runRenderJob({
           : null
     });
 
+    let renderBackgroundPath = backgroundPath;
+    if (visualMode === "comic") {
+      job.stage = "Preparing comic panels...";
+      job.progress = 0.38;
+      const panelFiles = await listComicPanels(comicPanelsDir);
+      await createComicPanelVideo({
+        panelPaths: panelFiles.map((file) => path.join(comicPanelsDir, file)),
+        outputPath: comicBackgroundPath,
+        durationSeconds,
+        layout: layout || "tiktok",
+        workDir: jobDir,
+        onProgress: (value) => {
+          job.progress = Math.max(job.progress, 0.38 + value * 0.18);
+        }
+      });
+      renderBackgroundPath = comicBackgroundPath;
+    }
+
     job.stage = "Rendering video...";
-    job.progress = 0.4;
+    job.progress = visualMode === "comic" ? 0.58 : 0.4;
     await renderVideo({
-      backgroundPath,
+      backgroundPath: renderBackgroundPath,
       audioPath,
       captionPath: captionsPath,
       outputPath,
       durationSeconds,
       layout: layout || "tiktok",
       onProgress: (value) => {
-        job.progress = Math.max(job.progress, 0.4 + value * 0.58);
+        const start = visualMode === "comic" ? 0.58 : 0.4;
+        const span = visualMode === "comic" ? 0.4 : 0.58;
+        job.progress = Math.max(job.progress, start + value * span);
       }
     });
 

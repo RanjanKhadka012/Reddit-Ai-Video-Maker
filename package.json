@@ -54,6 +54,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "comic-panels",
+        "to": "comic-panels",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "directories": {

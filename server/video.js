@@ -75,6 +75,14 @@ export async function listBackgrounds(backgroundDir) {
     });
 }
 
+export async function listComicPanels(panelDir) {
+  const entries = await fs.readdir(panelDir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && /\.(png|jpe?g|webp)$/i.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
+
 export async function getDuration(filePath) {
   const args = [
     "-v",
@@ -150,6 +158,100 @@ function captionLines(script, totalSeconds) {
   return lines;
 }
 
+const keywordStopWords = new Set([
+  "a",
+  "about",
+  "after",
+  "all",
+  "also",
+  "am",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "because",
+  "been",
+  "but",
+  "by",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "he",
+  "her",
+  "him",
+  "his",
+  "i",
+  "if",
+  "in",
+  "is",
+  "it",
+  "its",
+  "just",
+  "me",
+  "my",
+  "not",
+  "of",
+  "on",
+  "or",
+  "our",
+  "she",
+  "so",
+  "that",
+  "the",
+  "their",
+  "them",
+  "then",
+  "they",
+  "this",
+  "to",
+  "up",
+  "was",
+  "we",
+  "were",
+  "what",
+  "when",
+  "with",
+  "you",
+  "your"
+]);
+
+function keywordCaptionLines(script, totalSeconds) {
+  const words = String(script || "")
+    .split(/\s+/)
+    .map((word) => word.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ""))
+    .filter(Boolean);
+  const usable = words.filter((word) => word.length > 2 && !keywordStopWords.has(word.toLowerCase()));
+  const source = usable.length >= 8 ? usable : words;
+  const targetCount = Math.max(6, Math.min(120, Math.floor(totalSeconds / 1.15)));
+  const stride = Math.max(1, Math.floor(source.length / targetCount));
+  const lines = [];
+
+  for (let i = 0; i < source.length && lines.length < targetCount; i += stride) {
+    const chunkSize = source[i]?.length <= 4 && source[i + 1] ? 2 : 1;
+    const text = source
+      .slice(i, i + chunkSize)
+      .join(" ")
+      .toUpperCase();
+    if (text) lines.push({ text });
+  }
+
+  const slot = totalSeconds / Math.max(1, lines.length);
+  return lines.map((line, index) => ({
+    text: line.text,
+    start: index * slot,
+    end: Math.min(totalSeconds, index * slot + Math.max(0.75, slot * 0.82))
+  }));
+}
+
 function redditCardEvents({ card, totalSeconds, layout }) {
   if (!card) return "";
   const isYoutube = layout === "youtube";
@@ -166,18 +268,22 @@ function redditCardEvents({ card, totalSeconds, layout }) {
   return `Dialogue: 0,0:00:00.00,${assTime(totalSeconds)},RedditCard,,0,0,0,,${assEscape(cardText.join("\\N"))}`;
 }
 
-export async function writeAssCaptions({ script, outputPath, totalSeconds, layout, card }) {
+export async function writeAssCaptions({ script, outputPath, totalSeconds, layout, card, captionMode }) {
   const spec = layoutSpec(layout);
   const cardEvent = redditCardEvents({ card, totalSeconds, layout });
-  const captionEvents = captionLines(script, totalSeconds)
+  const lineSource = captionMode === "keyword" ? keywordCaptionLines(script, totalSeconds) : captionLines(script, totalSeconds);
+  const captionStyle = captionMode === "keyword" ? "Keyword" : "Caption";
+  const captionEvents = lineSource
     .map(
       (line) =>
-        `Dialogue: 1,${assTime(line.start)},${assTime(line.end)},Caption,,0,0,0,,${assEscape(line.text)}`
+        `Dialogue: 1,${assTime(line.start)},${assTime(line.end)},${captionStyle},,0,0,0,,${assEscape(line.text)}`
     )
     .join("\n");
   const events = [cardEvent, captionEvents].filter(Boolean).join("\n");
   const cardFontSize = layout === "youtube" ? 38 : 44;
   const cardMarginV = layout === "youtube" ? 70 : 150;
+  const keywordFontSize = layout === "youtube" ? 82 : 112;
+  const keywordMarginV = layout === "youtube" ? 210 : 540;
 
   const content = `[Script Info]
 ScriptType: v4.00+
@@ -187,6 +293,7 @@ PlayResY: ${spec.height}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Caption,Arial,${spec.fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H7A000000,-1,0,0,0,100,100,0,0,1,5,2,2,80,80,${spec.marginV},1
+Style: Keyword,Arial Black,${keywordFontSize},&H00004DFF,&H000000FF,&H00000000,&H7A000000,-1,0,0,0,100,100,0,0,1,8,3,2,80,80,${keywordMarginV},1
 Style: RedditCard,Arial,${cardFontSize},&H001A1A1B,&H000000FF,&H00FFFFFF,&H00FFFFFF,0,0,0,0,100,100,0,0,3,14,0,8,${layout === "youtube" ? 360 : 90},${layout === "youtube" ? 360 : 90},${cardMarginV},1
 
 [Events]
@@ -195,6 +302,72 @@ ${events}
 `;
 
   await fs.writeFile(outputPath, content, "utf8");
+}
+
+export async function createComicPanelVideo({ panelPaths, outputPath, durationSeconds, layout, workDir, onProgress }) {
+  if (!panelPaths.length) throw new Error("Add PNG/JPG/WebP comic panels to the comic-panels folder first.");
+
+  const spec = layoutSpec(layout);
+  const clipDir = path.join(workDir, "comic-clips");
+  await fs.mkdir(clipDir, { recursive: true });
+  const segmentSeconds = durationSeconds / panelPaths.length;
+  const clipPaths = [];
+
+  for (const [index, panelPath] of panelPaths.entries()) {
+    const clipPath = path.join(clipDir, `panel-${String(index).padStart(3, "0")}.mp4`);
+    const zoom = index % 2 === 0 ? 1.08 : 1.12;
+    const panX = index % 3 === 0 ? "sin(t*0.55)*18" : "cos(t*0.45)*18";
+    const panY = index % 2 === 0 ? "cos(t*0.38)*18" : "sin(t*0.5)*18";
+    const vf = [
+      `scale=${Math.round(spec.width * zoom)}:${Math.round(spec.height * zoom)}:force_original_aspect_ratio=increase`,
+      `crop=${spec.width}:${spec.height}:x='(in_w-out_w)/2+${panX}':y='(in_h-out_h)/2+${panY}'`,
+      "setsar=1",
+      "format=yuv420p"
+    ].join(",");
+
+    await run(ffmpegBin, [
+      "-y",
+      "-loop",
+      "1",
+      "-t",
+      String(segmentSeconds),
+      "-i",
+      panelPath,
+      "-vf",
+      vf,
+      "-r",
+      "30",
+      "-an",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "21",
+      clipPath
+    ]);
+    clipPaths.push(clipPath);
+    onProgress?.((index + 1) / Math.max(1, panelPaths.length + 1));
+  }
+
+  const concatPath = path.join(workDir, "comic-concat.txt");
+  const concatContent = clipPaths.map((clipPath) => `file '${clipPath.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n");
+  await fs.writeFile(concatPath, concatContent, "utf8");
+  await run(ffmpegBin, [
+    "-y",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    concatPath,
+    "-t",
+    String(durationSeconds),
+    "-c",
+    "copy",
+    outputPath
+  ]);
+  onProgress?.(1);
 }
 
 export async function renderVideo({ backgroundPath, audioPath, captionPath, outputPath, durationSeconds, layout, onProgress }) {

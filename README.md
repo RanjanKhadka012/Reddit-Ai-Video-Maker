@@ -17,6 +17,7 @@ A local Windows desktop app that turns Reddit stories into captioned videos with
 - Supports YouTube `16:9` output.
 - Shows render progress while generating.
 - Includes an original animated runner background.
+- Includes comic story mode with animated image panels and big keyword captions.
 - Lets you use your own `.mp4`, `.mov`, `.mkv`, or `.webm` background clips.
 
 ## Setup
@@ -58,6 +59,7 @@ When the portable app runs, it creates editable folders beside the `.exe`:
 ```text
 reddit-video-maker-data/backgrounds/
 reddit-video-maker-data/renders/
+reddit-video-maker-data/comic-panels/
 ```
 
 ## Background Clips
@@ -77,6 +79,22 @@ reddit-video-maker-data/backgrounds/
 ```
 
 Use clips you have rights to use. The app does not include Subway Surfers, Temple Run, or Minecraft footage.
+
+## Comic Story Mode
+
+Choose `Comic panels + keyword captions` in Visual mode to make videos like AI comic-story clips. Add numbered panels to:
+
+```text
+comic-panels/
+```
+
+In the portable `.exe`, use:
+
+```text
+reddit-video-maker-data/comic-panels/
+```
+
+Supported panel formats are `.png`, `.jpg`, `.jpeg`, and `.webp`. The app uses the files in filename order, animates them with a subtle pan/zoom, then burns large keyword captions over the video.
 
 ## ElevenLabs
 
