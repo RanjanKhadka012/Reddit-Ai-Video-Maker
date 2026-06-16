@@ -34,15 +34,16 @@ function sceneSentences(script) {
     .filter((sentence) => sentence.length > 20);
 }
 
-export function createScenePrompts({ script, panelCount, style }) {
+export function createScenePrompts({ script, title, panelCount, style }) {
   const sentences = sceneSentences(script);
   const count = Math.max(2, Math.min(24, Number(panelCount) || 8));
   const baseStyle = stylePrompts[style] || stylePrompts.comic;
+  const storyTitle = String(title || "Reddit story").replace(/\s+/g, " ").trim();
 
   if (!sentences.length) {
     return Array.from({ length: count }, (_item, index) => ({
       scene: `A dramatic moment from the story, scene ${index + 1}.`,
-      prompt: `${baseStyle}. Scene: A dramatic moment from the story, scene ${index + 1}.`
+      prompt: `${baseStyle}. Reddit thread title: ${storyTitle}. Scene ${index + 1}: A dramatic moment from the story.`
     }));
   }
 
@@ -60,7 +61,7 @@ export function createScenePrompts({ script, panelCount, style }) {
     const trimmedScene = scene.length > 420 ? `${scene.slice(0, 420)}...` : scene;
     return {
       scene: trimmedScene,
-      prompt: `${baseStyle}. Scene: ${trimmedScene}`
+      prompt: `${baseStyle}. Reddit thread title: ${storyTitle}. Illustrate this exact story moment as a single scene: ${trimmedScene}`
     };
   });
 }

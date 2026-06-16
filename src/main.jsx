@@ -19,6 +19,8 @@ function App() {
   const [time, setTime] = React.useState("day");
   const [stories, setStories] = React.useState([]);
   const [selectedStory, setSelectedStory] = React.useState(null);
+  const [threadComments, setThreadComments] = React.useState([]);
+  const [selectedCommentIds, setSelectedCommentIds] = React.useState([]);
   const [backgrounds, setBackgrounds] = React.useState([]);
   const [background, setBackground] = React.useState("");
   const [comicPanels, setComicPanels] = React.useState([]);
@@ -92,12 +94,68 @@ function App() {
       const payload = await api(`/api/reddit?${params}`);
       setStories(payload.stories);
       setSelectedStory(payload.stories[0] || null);
+      setThreadComments([]);
+      setSelectedCommentIds([]);
       setStatus(payload.stories.length ? "Pick a story and render." : "No long self-posts found. Try another subreddit.");
     } catch (error) {
       setStatus(error.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function loadThreadComments() {
+    if (!selectedStory?.permalink) {
+      setStatus("Select a Reddit thread first.");
+      return;
+    }
+
+    setBusy(true);
+    setStatus("Loading top comments from thread...");
+    try {
+      const params = new URLSearchParams({
+        permalink: selectedStory.permalink,
+        title: selectedStory.title,
+        subreddit: selectedStory.subreddit || subreddit,
+        limit: "25"
+      });
+      const payload = await api(`/api/reddit/comments?${params}`);
+      setThreadComments(payload.comments || []);
+      setSelectedCommentIds((payload.comments || []).slice(0, 3).map((comment) => comment.id));
+      setStatus(payload.comments?.length ? "Select comments to combine, then render." : "No usable comments found.");
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleComment(commentId) {
+    setSelectedCommentIds((current) =>
+      current.includes(commentId) ? current.filter((id) => id !== commentId) : [...current, commentId]
+    );
+  }
+
+  function combinedSelectedStory() {
+    const selectedComments = threadComments.filter((comment) => selectedCommentIds.includes(comment.id));
+    if (selectedComments.length === 0) return selectedStory;
+
+    const sections = selectedComments.map((comment, index) => {
+      const author = comment.author ? ` by u/${comment.author}` : "";
+      return `Comment ${index + 1}${author}. ${comment.selftext}`;
+    });
+    const script = `${selectedStory.title}. ${sections.join(" ")}`;
+    return {
+      ...selectedStory,
+      id: `${selectedStory.id || "thread"}-combined-${selectedCommentIds.join("-")}`,
+      title: `${selectedStory.title} (${selectedComments.length} comments)`,
+      author: selectedComments.map((comment) => comment.author).filter(Boolean).join(", "),
+      score: selectedComments.reduce((sum, comment) => sum + Number(comment.score || 0), 0),
+      selftext: sections.join("\n\n"),
+      script,
+      estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
+      source: "combined-thread-comments"
+    };
   }
 
   async function renderVideo() {
@@ -124,7 +182,7 @@ function App() {
       return;
     }
 
-    await renderStory(selectedStory);
+    await renderStory(combinedSelectedStory());
   }
 
   async function renderStory(storyToRender) {
@@ -308,7 +366,11 @@ function App() {
                 <button
                   className={`story-card ${selectedStory?.id === story.id ? "active" : ""}`}
                   key={story.id}
-                  onClick={() => setSelectedStory(story)}
+                  onClick={() => {
+                    setSelectedStory(story);
+                    setThreadComments([]);
+                    setSelectedCommentIds([]);
+                  }}
                 >
                   <span className="story-title">{story.title}</span>
                   <span className="story-meta">
@@ -325,7 +387,33 @@ function App() {
               <div className="selected-story">
                 <span>Selected</span>
                 <strong>{selectedStory ? selectedStory.title : "No story selected"}</strong>
+                {selectedCommentIds.length ? <em>{selectedCommentIds.length} thread comments selected</em> : null}
               </div>
+              {selectedStory?.permalink ? (
+                <div className="comment-picker">
+                  <button className="secondary full" onClick={loadThreadComments} disabled={busy}>
+                    <RefreshCw size={18} />
+                    Load Thread Comments
+                  </button>
+                  {threadComments.length ? (
+                    <div className="comment-list">
+                      {threadComments.map((comment) => (
+                        <label className="comment-option" key={comment.id}>
+                          <input
+                            type="checkbox"
+                            checked={selectedCommentIds.includes(comment.id)}
+                            onChange={() => toggleComment(comment.id)}
+                          />
+                          <span>
+                            <strong>u/{comment.author || "reddit"} · {comment.score || 0} points</strong>
+                            <small>{comment.selftext.slice(0, 170)}{comment.selftext.length > 170 ? "..." : ""}</small>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <label>
                 Visual mode
                 <select value={visualMode} onChange={(event) => setVisualMode(event.target.value)}>

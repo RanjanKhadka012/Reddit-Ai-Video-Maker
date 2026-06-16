@@ -247,6 +247,66 @@ textarea {
   line-height: 1.25;
 }
 
+.selected-story em {
+  color: #0e7490;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.comment-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.comment-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #d5dce5;
+  border-radius: 8px;
+  padding: 8px;
+  background: #f8fafc;
+}
+
+.comment-option {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  border-bottom: 1px solid #e1e7ef;
+  padding: 0 0 8px;
+  color: #26313d;
+  font-weight: 500;
+}
+
+.comment-option:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.comment-option input {
+  width: 18px;
+  min-height: 18px;
+  margin: 2px 0 0;
+  padding: 0;
+}
+
+.comment-option span {
+  display: grid;
+  gap: 4px;
+}
+
+.comment-option strong {
+  font-size: 12px;
+}
+
+.comment-option small {
+  color: #65707c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .preview {
   min-height: 360px;
 }

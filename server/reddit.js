@@ -268,6 +268,25 @@ function parseOldRedditComments(html, post, count) {
   return comments;
 }
 
+function commentToStory({ post, comment, source }) {
+  const body = cleanText(comment.body || "");
+  const script = buildScript({ title: post.title, selftext: body });
+  return {
+    id: `${post.id || "post"}-${comment.id}`,
+    commentId: comment.id,
+    title: cleanText(post.title),
+    author: comment.author || "reddit",
+    score: Number(comment.score || 0),
+    comments: post.num_comments || 0,
+    subreddit: post.subreddit,
+    permalink: post.permalink?.startsWith("http") ? post.permalink : `${REDDIT_BASE}${post.permalink || ""}`,
+    selftext: body,
+    script,
+    estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
+    source
+  };
+}
+
 async function fetchStoriesFromOldReddit({ subreddit, sort, time, limit, userAgent }) {
   const safeSort = ["hot", "new", "top", "rising"].includes(sort) ? sort : "top";
   const count = Math.min(Math.max(Number(limit) || 12, 1), 25);
@@ -381,4 +400,50 @@ export async function fetchStories({ subreddit, sort, time, limit, userAgent, cl
     .filter((post) => post.script.split(/\s+/).length >= 160)
     .sort((a, b) => b.score - a.score)
     .slice(0, count);
+}
+
+export async function fetchThreadComments({
+  permalink,
+  title,
+  subreddit,
+  limit,
+  userAgent,
+  clientId,
+  clientSecret
+}) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+  const url = new URL(permalink, REDDIT_BASE);
+  const path = url.pathname.replace(/\/$/, "");
+  const accessToken = await getAccessToken({ clientId, clientSecret, userAgent });
+  const response = await redditGet({
+    path,
+    params: new URLSearchParams({ limit: String(safeLimit), sort: "top", raw_json: "1" }),
+    userAgent,
+    accessToken
+  });
+
+  const post = {
+    id: path.match(/comments\/([^/]+)/)?.[1] || "thread",
+    title: title || "Reddit Thread",
+    subreddit: subreddit || path.match(/\/r\/([^/]+)/i)?.[1] || "reddit",
+    permalink: path,
+    num_comments: 0
+  };
+
+  if (response.ok) {
+    const json = await response.json();
+    const comments = json?.[1]?.data?.children || [];
+    return comments
+      .map((child) => child.data)
+      .filter((comment) => comment?.body && !comment.stickied && comment.body !== "[deleted]" && comment.body !== "[removed]")
+      .map((comment) => commentToStory({ post, comment, source: "thread-comment" }))
+      .filter((comment) => comment.selftext.split(/\s+/).filter(Boolean).length >= 30)
+      .slice(0, safeLimit);
+  }
+
+  const commentsHtml = await fetchOldRedditHtml(`${path}?sort=top`, userAgent);
+  return parseOldRedditComments(commentsHtml, post, safeLimit).map((comment) => ({
+    ...comment,
+    source: "old-reddit-thread-comment"
+  }));
 }

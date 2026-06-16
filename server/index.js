@@ -4,7 +4,7 @@ import cors from "cors";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { nanoid } from "nanoid";
-import { fetchStories } from "./reddit.js";
+import { fetchStories, fetchThreadComments } from "./reddit.js";
 import { synthesizeTimedTts } from "./tts.js";
 import {
   createScenePrompts,
@@ -78,6 +78,26 @@ app.get("/api/reddit", async (request, response, next) => {
       clientSecret: process.env.REDDIT_CLIENT_SECRET
     });
     response.json({ stories });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/reddit/comments", async (request, response, next) => {
+  try {
+    if (!request.query.permalink) throw new Error("Select a Reddit thread first.");
+    const comments = await fetchThreadComments({
+      permalink: String(request.query.permalink),
+      title: String(request.query.title || "Reddit Thread"),
+      subreddit: String(request.query.subreddit || "reddit"),
+      limit: Number(request.query.limit || 25),
+      userAgent:
+        process.env.REDDIT_USER_AGENT ||
+        "windows:reddit-video-maker:v1.0.0 by local_user",
+      clientId: process.env.REDDIT_CLIENT_ID,
+      clientSecret: process.env.REDDIT_CLIENT_SECRET
+    });
+    response.json({ comments });
   } catch (error) {
     next(error);
   }
@@ -248,6 +268,7 @@ async function runRenderJob({
       if (panelSource === "pollinations" || panelSource === "comfyui") {
         const prompts = createScenePrompts({
           script,
+          title: story.title,
           panelCount: Math.max(2, Math.min(24, Number(panelCount) || 8)),
           style: imageStyle || "comic"
         });
