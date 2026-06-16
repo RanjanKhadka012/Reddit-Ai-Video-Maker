@@ -121,6 +121,21 @@ async function getAudioDuration(filePath) {
   });
 }
 
+async function trimSpeechSilence(inputPath, outputPath) {
+  await run(ffmpegBin, [
+    "-y",
+    "-i",
+    inputPath,
+    "-af",
+    "silenceremove=start_periods=1:start_duration=0.08:start_threshold=-50dB:stop_periods=1:stop_duration=0.12:stop_threshold=-50dB",
+    "-codec:a",
+    "libmp3lame",
+    "-b:a",
+    "160k",
+    outputPath
+  ]);
+}
+
 function splitForCaptionTts(text, maxLength = 115) {
   const sentences = String(text || "").match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
   const chunks = [];
@@ -309,14 +324,19 @@ export async function synthesizeTimedTts({ text, voice, outputPath, workDir, ele
 
     for (const [index, chunk] of chunks.entries()) {
       const chunkPath = path.join(chunkDir, `chunk-${String(index).padStart(4, "0")}.mp3`);
+      const rawChunkPath = path.join(chunkDir, `chunk-${String(index).padStart(4, "0")}-raw.mp3`);
       const result = await synthesizeChunk({
         text: chunk,
-        outputPath: chunkPath,
+        outputPath: voice === "elevenlabs" ? rawChunkPath : chunkPath,
         voice,
         elevenLabsApiKey,
         elevenLabsVoiceId
       });
       provider = result.provider || provider;
+
+      if (voice === "elevenlabs") {
+        await trimSpeechSilence(rawChunkPath, chunkPath);
+      }
 
       const duration = Math.max(0.1, await getAudioDuration(chunkPath));
       timings.push({
@@ -333,7 +353,20 @@ export async function synthesizeTimedTts({ text, voice, outputPath, workDir, ele
       .map((chunkPath) => `file '${chunkPath.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`)
       .join("\n");
     await fs.writeFile(concatPath, concatContent, "utf8");
-    await run(ffmpegBin, ["-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", outputPath]);
+    await run(ffmpegBin, [
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      concatPath,
+      "-codec:a",
+      "libmp3lame",
+      "-b:a",
+      "160k",
+      outputPath
+    ]);
 
     return {
       chunks: chunks.length,

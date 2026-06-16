@@ -13,6 +13,27 @@ const voices = [
   { id: "en_us_009", label: "TikTok Story" }
 ];
 
+function estimateSecondsFromText(text) {
+  const words = String(text || "").split(/\s+/).filter(Boolean).length;
+  return Math.max(30, Math.round((words / 145) * 60));
+}
+
+function formatDuration(seconds) {
+  const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = String(safeSeconds % 60).padStart(2, "0");
+  return `${minutes}:${remainder}`;
+}
+
+function safeVideoFilename(title) {
+  const clean = String(title || "reddit-video")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 90);
+  return `${clean || "reddit-video"}.mp4`;
+}
+
 function App() {
   const [subreddit, setSubreddit] = React.useState("AskReddit");
   const [sort, setSort] = React.useState("top");
@@ -153,10 +174,16 @@ function App() {
       score: selectedComments.reduce((sum, comment) => sum + Number(comment.score || 0), 0),
       selftext: sections.join("\n\n"),
       script,
-      estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
+      estimatedSeconds: estimateSecondsFromText(script),
       source: "combined-thread-comments"
     };
   }
+
+  const storyForRender = selectedStory ? combinedSelectedStory() : null;
+  const estimatedVideoSeconds = storyForRender?.estimatedSeconds || 0;
+  const cappedTargetSeconds = Math.round(Number(targetMinutes || 0) * 60);
+  const estimateFill = Math.min(100, Math.round((estimatedVideoSeconds / 600) * 100));
+  const downloadFilename = safeVideoFilename(renderResult?.title || storyForRender?.title || manualTitle);
 
   async function renderVideo() {
     if (!selectedStory) {
@@ -172,7 +199,7 @@ function App() {
           permalink: "",
           selftext: script,
           script,
-          estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
+          estimatedSeconds: estimateSecondsFromText(script),
           source: "manual"
         });
         return;
@@ -182,7 +209,7 @@ function App() {
       return;
     }
 
-    await renderStory(combinedSelectedStory());
+    await renderStory(storyForRender);
   }
 
   async function renderStory(storyToRender) {
@@ -233,7 +260,7 @@ function App() {
         })
       });
       const result = await waitForRenderJob(payload.jobId);
-      setRenderResult(result);
+      setRenderResult({ ...result, title: storyToRender.title });
       setStatus(`Rendered ${Math.round(result.durationSeconds)} seconds.`);
     } catch (error) {
       setStatus(error.message);
@@ -275,7 +302,7 @@ function App() {
       permalink: "",
       selftext: script,
       script,
-      estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
+      estimatedSeconds: estimateSecondsFromText(script),
       source: "manual"
     });
     setStatus("Manual script selected. Choose a background and render.");
@@ -389,6 +416,21 @@ function App() {
                 <strong>{selectedStory ? selectedStory.title : "No story selected"}</strong>
                 {selectedCommentIds.length ? <em>{selectedCommentIds.length} thread comments selected</em> : null}
               </div>
+              {storyForRender ? (
+                <div className="length-estimate">
+                  <div className="length-row">
+                    <span>Estimated video</span>
+                    <strong>{formatDuration(estimatedVideoSeconds)}</strong>
+                  </div>
+                  <div className="length-track">
+                    <div className="length-fill" style={{ width: `${estimateFill}%` }} />
+                  </div>
+                  <small>
+                    Target cap {formatDuration(cappedTargetSeconds)} ·{" "}
+                    {storyForRender.script.split(/\s+/).filter(Boolean).length} words
+                  </small>
+                </div>
+              ) : null}
               {selectedStory?.permalink ? (
                 <div className="comment-picker">
                   <button className="secondary full" onClick={loadThreadComments} disabled={busy}>
@@ -396,21 +438,30 @@ function App() {
                     Load Thread Comments
                   </button>
                   {threadComments.length ? (
-                    <div className="comment-list">
-                      {threadComments.map((comment) => (
-                        <label className="comment-option" key={comment.id}>
-                          <input
-                            type="checkbox"
-                            checked={selectedCommentIds.includes(comment.id)}
-                            onChange={() => toggleComment(comment.id)}
-                          />
-                          <span>
-                            <strong>u/{comment.author || "reddit"} · {comment.score || 0} points</strong>
-                            <small>{comment.selftext.slice(0, 170)}{comment.selftext.length > 170 ? "..." : ""}</small>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
+                    <>
+                      <div className="comment-list">
+                        {threadComments.map((comment) => (
+                          <label className="comment-option" key={comment.id}>
+                            <input
+                              type="checkbox"
+                              checked={selectedCommentIds.includes(comment.id)}
+                              onChange={() => toggleComment(comment.id)}
+                            />
+                            <span>
+                              <strong>
+                                u/{comment.author || "reddit"} · {comment.score || 0} points ·{" "}
+                                {formatDuration(comment.estimatedSeconds)}
+                              </strong>
+                              <small>{comment.selftext.slice(0, 170)}{comment.selftext.length > 170 ? "..." : ""}</small>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <button className="primary full" onClick={renderVideo} disabled={busy}>
+                        {busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
+                        Render Selected Comments
+                      </button>
+                    </>
                   ) : null}
                 </div>
               ) : null}
@@ -623,7 +674,7 @@ function App() {
               {renderResult ? (
                 <>
                   <video controls src={`${API}${renderResult.videoUrl}`} />
-                  <a className="download" href={`${API}${renderResult.videoUrl}`} download>
+                  <a className="download" href={`${API}${renderResult.videoUrl}`} download={downloadFilename}>
                     <Download size={18} />
                     Download MP4
                   </a>

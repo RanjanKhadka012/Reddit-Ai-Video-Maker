@@ -254,6 +254,49 @@ textarea {
   font-weight: 800;
 }
 
+.length-estimate {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #d5dce5;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.length-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #33404d;
+  font-size: 13px;
+}
+
+.length-row strong {
+  color: #0e7490;
+  font-size: 16px;
+}
+
+.length-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dde5ee;
+}
+
+.length-fill {
+  height: 100%;
+  min-width: 4%;
+  border-radius: inherit;
+  background: #0e7490;
+  transition: width 180ms ease;
+}
+
+.length-estimate small {
+  color: #65707c;
+  font-size: 12px;
+}
+
 .comment-picker {
   display: grid;
   gap: 10px;
