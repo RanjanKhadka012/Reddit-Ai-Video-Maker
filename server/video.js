@@ -252,6 +252,31 @@ function keywordCaptionLines(script, totalSeconds) {
   }));
 }
 
+function keywordFromText(text) {
+  const words = String(text || "")
+    .split(/\s+/)
+    .map((word) => word.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ""))
+    .filter(Boolean);
+  const usable = words.filter((word) => word.length > 2 && !keywordStopWords.has(word.toLowerCase()));
+  const source = usable.length ? usable : words;
+  const picked = source
+    .sort((a, b) => b.length - a.length)
+    .slice(0, source[0]?.length <= 4 ? 2 : 1)
+    .join(" ");
+  return (picked || words.slice(0, 2).join(" ") || "STORY").toUpperCase();
+}
+
+function timedCaptionLines(timings, totalSeconds, captionMode) {
+  if (!Array.isArray(timings) || timings.length === 0) return null;
+  return timings
+    .map((line) => ({
+      text: captionMode === "keyword" ? keywordFromText(line.text) : line.text,
+      start: Math.max(0, Math.min(totalSeconds, Number(line.start) || 0)),
+      end: Math.max(0, Math.min(totalSeconds, Number(line.end) || 0))
+    }))
+    .filter((line) => line.end > line.start);
+}
+
 function redditCardEvents({ card, totalSeconds, layout }) {
   if (!card) return "";
   const isYoutube = layout === "youtube";
@@ -268,10 +293,12 @@ function redditCardEvents({ card, totalSeconds, layout }) {
   return `Dialogue: 0,0:00:00.00,${assTime(totalSeconds)},RedditCard,,0,0,0,,${assEscape(cardText.join("\\N"))}`;
 }
 
-export async function writeAssCaptions({ script, outputPath, totalSeconds, layout, card, captionMode }) {
+export async function writeAssCaptions({ script, outputPath, totalSeconds, layout, card, captionMode, timedLines }) {
   const spec = layoutSpec(layout);
   const cardEvent = redditCardEvents({ card, totalSeconds, layout });
-  const lineSource = captionMode === "keyword" ? keywordCaptionLines(script, totalSeconds) : captionLines(script, totalSeconds);
+  const lineSource =
+    timedCaptionLines(timedLines, totalSeconds, captionMode) ||
+    (captionMode === "keyword" ? keywordCaptionLines(script, totalSeconds) : captionLines(script, totalSeconds));
   const captionStyle = captionMode === "keyword" ? "Keyword" : "Caption";
   const captionEvents = lineSource
     .map(

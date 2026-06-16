@@ -5,7 +5,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { nanoid } from "nanoid";
 import { fetchStories } from "./reddit.js";
-import { synthesizeTikTokTts } from "./tts.js";
+import { synthesizeTimedTts } from "./tts.js";
 import {
   createScenePrompts,
   generateComfyPanels,
@@ -205,10 +205,11 @@ async function runRenderJob({
   try {
     job.stage = "Generating narration...";
     job.progress = 0.08;
-    await synthesizeTikTokTts({
+    const ttsResult = await synthesizeTimedTts({
       text: script,
       voice: voice || process.env.TIKTOK_TTS_VOICE || "google-natural",
       outputPath: audioPath,
+      workDir: jobDir,
       elevenLabsApiKey,
       elevenLabsVoiceId
     });
@@ -227,6 +228,7 @@ async function runRenderJob({
       totalSeconds: durationSeconds,
       layout: layout || "tiktok",
       captionMode: visualMode === "comic" ? "keyword" : "full",
+      timedLines: ttsResult.timings,
       card:
         visualMode === "reddit-card"
           ? {
