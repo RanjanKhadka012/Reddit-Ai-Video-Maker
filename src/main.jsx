@@ -42,6 +42,7 @@ function App() {
   const [selectedStory, setSelectedStory] = React.useState(null);
   const [threadComments, setThreadComments] = React.useState([]);
   const [selectedCommentIds, setSelectedCommentIds] = React.useState([]);
+  const [commentCount, setCommentCount] = React.useState(3);
   const [backgrounds, setBackgrounds] = React.useState([]);
   const [background, setBackground] = React.useState("");
   const [comicPanels, setComicPanels] = React.useState([]);
@@ -117,7 +118,7 @@ function App() {
       setSelectedStory(payload.stories[0] || null);
       setThreadComments([]);
       setSelectedCommentIds([]);
-      setStatus(payload.stories.length ? "Pick a story and render." : "No long self-posts found. Try another subreddit.");
+      setStatus(payload.stories.length ? "Pick a top story, then load thread comments to make it longer." : "No top stories found. Try another subreddit.");
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -142,7 +143,7 @@ function App() {
       });
       const payload = await api(`/api/reddit/comments?${params}`);
       setThreadComments(payload.comments || []);
-      setSelectedCommentIds((payload.comments || []).slice(0, 3).map((comment) => comment.id));
+      setSelectedCommentIds((payload.comments || []).slice(0, commentCount).map((comment) => comment.id));
       setStatus(payload.comments?.length ? "Select comments to combine, then render." : "No usable comments found.");
     } catch (error) {
       setStatus(error.message);
@@ -155,6 +156,12 @@ function App() {
     setSelectedCommentIds((current) =>
       current.includes(commentId) ? current.filter((id) => id !== commentId) : [...current, commentId]
     );
+  }
+
+  function useTopComments(count) {
+    const safeCount = Math.max(1, Math.min(25, Number(count) || 1));
+    setCommentCount(safeCount);
+    setSelectedCommentIds(threadComments.slice(0, safeCount).map((comment) => comment.id));
   }
 
   function combinedSelectedStory() {
@@ -181,7 +188,8 @@ function App() {
 
   const storyForRender = selectedStory ? combinedSelectedStory() : null;
   const estimatedVideoSeconds = storyForRender?.estimatedSeconds || 0;
-  const cappedTargetSeconds = Math.round(Number(targetMinutes || 0) * 60);
+  const effectiveTargetMinutes = Math.min(15, Math.max(Number(targetMinutes || 0), estimatedVideoSeconds / 60 + 0.5));
+  const cappedTargetSeconds = Math.round(effectiveTargetMinutes * 60);
   const estimateFill = Math.min(100, Math.round((estimatedVideoSeconds / 600) * 100));
   const downloadFilename = safeVideoFilename(renderResult?.title || storyForRender?.title || manualTitle);
 
@@ -246,7 +254,7 @@ function App() {
           story: storyToRender,
           background,
           voice,
-          targetMinutes,
+          targetMinutes: effectiveTargetMinutes,
           layout,
           visualMode,
           panelSource,
@@ -426,7 +434,7 @@ function App() {
                     <div className="length-fill" style={{ width: `${estimateFill}%` }} />
                   </div>
                   <small>
-                    Target cap {formatDuration(cappedTargetSeconds)} ·{" "}
+                    Render cap {formatDuration(cappedTargetSeconds)} ·{" "}
                     {storyForRender.script.split(/\s+/).filter(Boolean).length} words
                   </small>
                 </div>
@@ -439,6 +447,18 @@ function App() {
                   </button>
                   {threadComments.length ? (
                     <>
+                      <label>
+                        Use top comments
+                        <select value={commentCount} onChange={(event) => useTopComments(event.target.value)}>
+                          {Array.from({ length: Math.min(25, threadComments.length) }, (_item, index) => index + 1).map(
+                            (count) => (
+                              <option key={count} value={count}>
+                                {count} comment{count === 1 ? "" : "s"}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </label>
                       <div className="comment-list">
                         {threadComments.map((comment) => (
                           <label className="comment-option" key={comment.id}>
@@ -649,7 +669,7 @@ function App() {
                 <input
                   type="range"
                   min="0.5"
-                  max="10"
+                  max="15"
                   step="0.1"
                   value={targetMinutes}
                   onChange={(event) => setTargetMinutes(event.target.value)}

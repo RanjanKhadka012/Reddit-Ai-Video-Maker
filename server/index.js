@@ -237,8 +237,8 @@ async function runRenderJob({
     job.stage = "Measuring narration...";
     job.progress = 0.28;
     const audioSeconds = await getDuration(audioPath);
-    const requestedSeconds = Math.round(Math.min(600, Math.max(30, Number(targetMinutes || 2.4) * 60)));
-    const durationSeconds = Math.min(600, Math.max(30, Math.min(audioSeconds || requestedSeconds, requestedSeconds)));
+    const requestedSeconds = Math.round(Math.min(900, Math.max(30, Number(targetMinutes || 2.4) * 60)));
+    const durationSeconds = Math.min(900, Math.max(30, Math.min(audioSeconds || requestedSeconds, requestedSeconds)));
 
     job.stage = "Writing captions...";
     job.progress = 0.34;

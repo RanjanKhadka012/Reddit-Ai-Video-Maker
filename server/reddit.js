@@ -298,29 +298,23 @@ async function fetchStoriesFromOldReddit({ subreddit, sort, time, limit, userAge
   for (const post of posts) {
     if (stories.length >= count) break;
 
-    try {
-      const commentsHtml = await fetchOldRedditHtml(`${post.permalink}?sort=top`, userAgent);
-      stories.push(...parseOldRedditComments(commentsHtml, post, Math.max(1, count - stories.length)));
-    } catch {
-      const script = buildScript(post);
-      stories.push({
-        id: post.id,
-        title: post.title,
-        author: "old-reddit",
-        score: post.score,
-        comments: post.num_comments,
-        subreddit: post.subreddit,
-        permalink: `${REDDIT_BASE}${post.permalink}`,
-        selftext: post.selftext,
-        script,
-        estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
-        source: "old-reddit-post"
-      });
-    }
+    const script = buildScript(post);
+    stories.push({
+      id: post.id,
+      title: post.title,
+      author: "old-reddit",
+      score: post.score,
+      comments: post.num_comments,
+      subreddit: post.subreddit,
+      permalink: `${REDDIT_BASE}${post.permalink}`,
+      selftext: post.selftext,
+      script,
+      estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
+      source: "old-reddit-post"
+    });
   }
 
   return stories
-    .filter((post) => post.script.split(/\s+/).length >= 80)
     .sort((a, b) => b.score - a.score)
     .slice(0, count);
 }
@@ -374,30 +368,23 @@ export async function fetchStories({ subreddit, sort, time, limit, userAgent, cl
   const stories = [];
 
   for (const post of posts) {
-    const bodyWords = cleanText(post.selftext || "").split(/\s+/).filter(Boolean).length;
-
-    if (bodyWords >= 160) {
-      const script = buildScript(post);
-      stories.push({
-        id: post.id,
-        title: cleanText(post.title),
-        author: post.author,
-        score: post.score,
-        comments: post.num_comments,
-        subreddit: post.subreddit,
-        permalink: `${REDDIT_BASE}${post.permalink}`,
-        selftext: cleanText(post.selftext || ""),
-        script,
-        estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
-        source: "post"
-      });
-    } else if (stories.length < count) {
-      stories.push(...(await fetchTopCommentStories({ post, userAgent, accessToken })));
-    }
+    const script = buildScript(post);
+    stories.push({
+      id: post.id,
+      title: cleanText(post.title),
+      author: post.author,
+      score: post.score,
+      comments: post.num_comments,
+      subreddit: post.subreddit,
+      permalink: `${REDDIT_BASE}${post.permalink}`,
+      selftext: cleanText(post.selftext || ""),
+      script,
+      estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
+      source: "post"
+    });
   }
 
   return stories
-    .filter((post) => post.script.split(/\s+/).length >= 160)
     .sort((a, b) => b.score - a.score)
     .slice(0, count);
 }
