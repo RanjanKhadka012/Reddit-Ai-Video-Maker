@@ -287,6 +287,23 @@ function commentToStory({ post, comment, source }) {
   };
 }
 
+function postToStory(post, source = "manual-link-post") {
+  const script = buildScript(post);
+  return {
+    id: post.id || `manual-${Date.now()}`,
+    title: cleanText(post.title || "Reddit Thread"),
+    author: post.author || "reddit",
+    score: Number(post.score || 0),
+    comments: Number(post.num_comments || 0),
+    subreddit: post.subreddit || "reddit",
+    permalink: post.permalink?.startsWith("http") ? post.permalink : `${REDDIT_BASE}${post.permalink || ""}`,
+    selftext: cleanText(post.selftext || ""),
+    script,
+    estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60)),
+    source
+  };
+}
+
 async function fetchStoriesFromOldReddit({ subreddit, sort, time, limit, userAgent }) {
   const safeSort = ["hot", "new", "top", "rising"].includes(sort) ? sort : "top";
   const count = Math.min(Math.max(Number(limit) || 12, 1), 25);
@@ -317,6 +334,32 @@ async function fetchStoriesFromOldReddit({ subreddit, sort, time, limit, userAge
   return stories
     .sort((a, b) => b.score - a.score)
     .slice(0, count);
+}
+
+export async function fetchThreadPost({ permalink, userAgent, clientId, clientSecret }) {
+  if (!permalink) throw new Error("Paste a Reddit post link first.");
+  const url = new URL(permalink, REDDIT_BASE);
+  const path = url.pathname.replace(/\/$/, "");
+  if (!/\/comments\//i.test(path)) throw new Error("Paste a full Reddit post URL that includes /comments/.");
+
+  const accessToken = await getAccessToken({ clientId, clientSecret, userAgent });
+  const response = await redditGet({
+    path,
+    params: new URLSearchParams({ limit: "1", raw_json: "1" }),
+    userAgent,
+    accessToken
+  });
+
+  if (response.ok) {
+    const json = await response.json();
+    const post = json?.[0]?.data?.children?.[0]?.data;
+    if (post) return postToStory(post, "manual-link-post");
+  }
+
+  const html = await fetchOldRedditHtml(path, userAgent);
+  const post = parseOldRedditListing(html, path.match(/\/r\/([^/]+)/i)?.[1] || "reddit", 1)[0];
+  if (!post) throw new Error("Could not read that Reddit post.");
+  return postToStory(post, "manual-link-post");
 }
 
 export async function fetchStories({ subreddit, sort, time, limit, userAgent, clientId, clientSecret }) {

@@ -100,6 +100,45 @@ button:disabled {
   margin-bottom: 16px;
 }
 
+.quick-tools {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.preset-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preset-button {
+  min-height: 34px;
+  border: 1px solid #cdd5df;
+  background: white;
+  color: #33404d;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.preset-button.active {
+  border-color: #0e7490;
+  background: #ecfeff;
+  color: #12313a;
+  font-weight: 800;
+}
+
+.post-link-loader {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid #cdd5df;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px;
+}
+
 .status-banner {
   min-height: 44px;
   display: flex;
@@ -499,6 +538,10 @@ textarea {
 
   .control-strip {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .post-link-loader {
+    grid-template-columns: 1fr;
   }
 
   .render-panel {

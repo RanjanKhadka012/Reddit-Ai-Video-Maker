@@ -4,7 +4,7 @@ import cors from "cors";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { nanoid } from "nanoid";
-import { fetchStories, fetchThreadComments } from "./reddit.js";
+import { fetchStories, fetchThreadComments, fetchThreadPost } from "./reddit.js";
 import { synthesizeTimedTts } from "./tts.js";
 import {
   createScenePrompts,
@@ -98,6 +98,22 @@ app.get("/api/reddit/comments", async (request, response, next) => {
       clientSecret: process.env.REDDIT_CLIENT_SECRET
     });
     response.json({ comments });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/reddit/thread", async (request, response, next) => {
+  try {
+    const story = await fetchThreadPost({
+      permalink: String(request.query.permalink || ""),
+      userAgent:
+        process.env.REDDIT_USER_AGENT ||
+        "windows:reddit-video-maker:v1.0.0 by local_user",
+      clientId: process.env.REDDIT_CLIENT_ID,
+      clientSecret: process.env.REDDIT_CLIENT_SECRET
+    });
+    response.json({ story });
   } catch (error) {
     next(error);
   }

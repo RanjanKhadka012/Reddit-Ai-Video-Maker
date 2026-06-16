@@ -13,6 +13,21 @@ const voices = [
   { id: "en_us_009", label: "TikTok Story" }
 ];
 
+const subredditPresets = [
+  "AskReddit",
+  "TrueOffMyChest",
+  "AmItheAsshole",
+  "AITAH",
+  "confession",
+  "relationship_advice",
+  "pettyrevenge",
+  "ProRevenge",
+  "MaliciousCompliance",
+  "tifu",
+  "NoSleep",
+  "LetsNotMeet"
+];
+
 function estimateSecondsFromText(text) {
   const words = String(text || "").split(/\s+/).filter(Boolean).length;
   return Math.max(30, Math.round((words / 145) * 60));
@@ -36,6 +51,7 @@ function safeVideoFilename(title) {
 
 function App() {
   const [subreddit, setSubreddit] = React.useState("AskReddit");
+  const [manualPostUrl, setManualPostUrl] = React.useState("");
   const [sort, setSort] = React.useState("top");
   const [time, setTime] = React.useState("day");
   const [stories, setStories] = React.useState([]);
@@ -119,6 +135,34 @@ function App() {
       setThreadComments([]);
       setSelectedCommentIds([]);
       setStatus(payload.stories.length ? "Pick a top story, then load thread comments to make it longer." : "No top stories found. Try another subreddit.");
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadManualPost() {
+    if (!manualPostUrl.trim()) {
+      setStatus("Paste a Reddit post link first.");
+      return;
+    }
+
+    setBusy(true);
+    setStatus("Loading Reddit post...");
+    setRenderResult(null);
+    try {
+      const params = new URLSearchParams({ permalink: manualPostUrl.trim() });
+      const payload = await api(`/api/reddit/thread?${params}`);
+      setStories((current) => {
+        const withoutDuplicate = current.filter((story) => story.permalink !== payload.story.permalink);
+        return [payload.story, ...withoutDuplicate];
+      });
+      setSelectedStory(payload.story);
+      setSubreddit(payload.story.subreddit || subreddit);
+      setThreadComments([]);
+      setSelectedCommentIds([]);
+      setStatus("Loaded post. Now load thread comments or render the post.");
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -382,6 +426,35 @@ function App() {
             <Search size={18} />
             Get Stories
           </button>
+        </div>
+
+        <div className="quick-tools">
+          <div className="preset-strip" aria-label="Similar subreddits">
+            {subredditPresets.map((item) => (
+              <button
+                className={`preset-button ${subreddit.toLowerCase() === item.toLowerCase() ? "active" : ""}`}
+                key={item}
+                onClick={() => setSubreddit(item)}
+                disabled={busy}
+              >
+                r/{item}
+              </button>
+            ))}
+          </div>
+          <div className="post-link-loader">
+            <label>
+              Reddit post link
+              <input
+                value={manualPostUrl}
+                onChange={(event) => setManualPostUrl(event.target.value)}
+                placeholder="https://www.reddit.com/r/AskReddit/comments/..."
+              />
+            </label>
+            <button className="secondary" onClick={loadManualPost} disabled={busy}>
+              <Search size={18} />
+              Load Post
+            </button>
+          </div>
         </div>
 
         <div className={`status-banner ${status ? "active" : ""}`}>
