@@ -258,6 +258,153 @@ async function synthesizeElevenLabs({ text, outputPath, apiKey, voiceId }) {
   return { chunks: 1, provider: "elevenlabs" };
 }
 
+async function synthesizeElevenLabsWithTimestamps({ text, outputPath, apiKey, voiceId }) {
+  if (!apiKey) throw new Error("Add an ElevenLabs API key before using ElevenLabs voice.");
+
+  const response = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
+      voiceId || DEFAULT_ELEVENLABS_VOICE
+    )}/with-timestamps`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "xi-api-key": apiKey
+      },
+      body: JSON.stringify({
+        text,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: {
+          stability: 0.42,
+          similarity_boost: 0.82,
+          style: 0.25,
+          use_speaker_boost: true
+        }
+      })
+    }
+  );
+
+  if (!response.ok) {
+    let details = "";
+    try {
+      details = await response.text();
+    } catch {
+      details = "";
+    }
+    throw new Error(`ElevenLabs timestamp TTS returned ${response.status}. ${details.slice(0, 220)}`);
+  }
+
+  const payload = await response.json();
+  if (!payload?.audio_base64) {
+    throw new Error("ElevenLabs timestamp TTS did not return audio.");
+  }
+
+  await fs.writeFile(outputPath, Buffer.from(payload.audio_base64, "base64"));
+  return payload.normalized_alignment || payload.alignment || null;
+}
+
+function captionRangesFromAlignedText(text, maxLength = 115) {
+  const ranges = [];
+  const words = [...String(text || "").matchAll(/\S+/g)];
+  let start = null;
+  let end = null;
+  let previousWord = "";
+
+  for (const match of words) {
+    const word = match[0];
+    const wordStart = match.index;
+    const wordEnd = wordStart + word.length;
+
+    if (start === null) {
+      start = wordStart;
+      end = wordEnd;
+      previousWord = word;
+      continue;
+    }
+
+    const currentText = text.slice(start, end).trim();
+    const nextText = text.slice(start, wordEnd).trim();
+    const shouldBreak =
+      nextText.length > maxLength || (currentText.length >= 48 && /[.!?;:]$/.test(previousWord));
+
+    if (shouldBreak) {
+      ranges.push({ start, end });
+      start = wordStart;
+    }
+
+    end = wordEnd;
+    previousWord = word;
+  }
+
+  if (start !== null && end !== null) ranges.push({ start, end });
+  return ranges;
+}
+
+function alignmentToCaptionTimings(alignment, offsetSeconds = 0) {
+  const characters = alignment?.characters;
+  const starts = alignment?.character_start_times_seconds;
+  const ends = alignment?.character_end_times_seconds;
+  if (!Array.isArray(characters) || !Array.isArray(starts) || !Array.isArray(ends)) return [];
+
+  const alignedText = characters.join("");
+  const ranges = captionRangesFromAlignedText(alignedText);
+  const timings = [];
+
+  for (const range of ranges) {
+    let firstTimed = -1;
+    let lastTimed = -1;
+
+    for (let index = range.start; index < range.end; index += 1) {
+      if (Number.isFinite(starts[index]) && String(characters[index] || "").trim()) {
+        firstTimed = index;
+        break;
+      }
+    }
+
+    for (let index = range.end - 1; index >= range.start; index -= 1) {
+      if (Number.isFinite(ends[index]) && String(characters[index] || "").trim()) {
+        lastTimed = index;
+        break;
+      }
+    }
+
+    if (firstTimed < 0 || lastTimed < 0) continue;
+
+    const start = offsetSeconds + starts[firstTimed];
+    const end = Math.max(start + 0.2, offsetSeconds + ends[lastTimed]);
+    timings.push({
+      text: alignedText.slice(range.start, range.end).replace(/\s+/g, " ").trim(),
+      start,
+      end
+    });
+  }
+
+  return timings;
+}
+
+async function concatAudioFiles({ files, outputPath, workDir }) {
+  const concatPath = path.join(workDir, "concat.txt");
+  const concatContent = files
+    .map((chunkPath) => `file '${chunkPath.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`)
+    .join("\n");
+  await fs.writeFile(concatPath, concatContent, "utf8");
+  await run(ffmpegBin, [
+    "-y",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    concatPath,
+    "-codec:a",
+    "libmp3lame",
+    "-b:a",
+    "160k",
+    outputPath
+  ]);
+}
+
 export async function synthesizeTikTokTts({ text, voice, outputPath, elevenLabsApiKey, elevenLabsVoiceId }) {
   if (voice === "elevenlabs") {
     return synthesizeElevenLabs({
@@ -311,7 +458,40 @@ async function synthesizeChunk({ text, outputPath, voice, elevenLabsApiKey, elev
   return { provider: "tiktok-unofficial" };
 }
 
-export async function synthesizeTimedTts({ text, voice, outputPath, workDir, elevenLabsApiKey, elevenLabsVoiceId }) {
+async function synthesizeElevenLabsTimed({ text, outputPath, workDir, elevenLabsApiKey, elevenLabsVoiceId }) {
+  const apiKey = elevenLabsApiKey || process.env.ELEVENLABS_API_KEY;
+  const voiceId = elevenLabsVoiceId || process.env.ELEVENLABS_VOICE_ID;
+  const largeChunks = splitForTts(text, 1800);
+  const chunkDir = path.join(workDir, "tts-elevenlabs-timed");
+  await fs.mkdir(chunkDir, { recursive: true });
+
+  const chunkFiles = [];
+  const timings = [];
+  let cursor = 0;
+
+  for (const [index, chunk] of largeChunks.entries()) {
+    const chunkPath = path.join(chunkDir, `chunk-${String(index).padStart(4, "0")}.mp3`);
+    const alignment = await synthesizeElevenLabsWithTimestamps({
+      text: chunk,
+      outputPath: chunkPath,
+      apiKey,
+      voiceId
+    });
+    chunkFiles.push(chunkPath);
+    timings.push(...alignmentToCaptionTimings(alignment, cursor));
+    cursor += Math.max(0.1, await getAudioDuration(chunkPath));
+  }
+
+  await concatAudioFiles({ files: chunkFiles, outputPath, workDir: chunkDir });
+  return {
+    chunks: largeChunks.length,
+    provider: "elevenlabs-with-timestamps",
+    timings: timings.length ? timings : null,
+    durationSeconds: cursor
+  };
+}
+
+async function synthesizeMeasuredTimedTts({ text, voice, outputPath, workDir, elevenLabsApiKey, elevenLabsVoiceId }) {
   const chunks = splitForCaptionTts(text);
   const chunkDir = path.join(workDir, "tts-chunks");
   await fs.mkdir(chunkDir, { recursive: true });
@@ -348,25 +528,7 @@ export async function synthesizeTimedTts({ text, voice, outputPath, workDir, ele
       chunkFiles.push(chunkPath);
     }
 
-    const concatPath = path.join(chunkDir, "concat.txt");
-    const concatContent = chunkFiles
-      .map((chunkPath) => `file '${chunkPath.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`)
-      .join("\n");
-    await fs.writeFile(concatPath, concatContent, "utf8");
-    await run(ffmpegBin, [
-      "-y",
-      "-f",
-      "concat",
-      "-safe",
-      "0",
-      "-i",
-      concatPath,
-      "-codec:a",
-      "libmp3lame",
-      "-b:a",
-      "160k",
-      outputPath
-    ]);
+    await concatAudioFiles({ files: chunkFiles, outputPath, workDir: chunkDir });
 
     return {
       chunks: chunks.length,
@@ -379,4 +541,29 @@ export async function synthesizeTimedTts({ text, voice, outputPath, workDir, ele
     const fallback = await synthesizeTikTokTts({ text, voice, outputPath, elevenLabsApiKey, elevenLabsVoiceId });
     return { ...fallback, timings: null };
   }
+}
+
+export async function synthesizeTimedTts({ text, voice, outputPath, workDir, elevenLabsApiKey, elevenLabsVoiceId }) {
+  if (voice === "elevenlabs") {
+    try {
+      return await synthesizeElevenLabsTimed({
+        text,
+        outputPath,
+        workDir,
+        elevenLabsApiKey,
+        elevenLabsVoiceId
+      });
+    } catch (error) {
+      console.warn(`ElevenLabs timestamp TTS failed, falling back to measured chunks: ${error.message}`);
+    }
+  }
+
+  return synthesizeMeasuredTimedTts({
+    text,
+    voice,
+    outputPath,
+    workDir,
+    elevenLabsApiKey,
+    elevenLabsVoiceId
+  });
 }
