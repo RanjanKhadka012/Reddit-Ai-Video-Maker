@@ -180,10 +180,21 @@ function App() {
     setBusy(true);
     setStatus("Loading top comments from thread...");
     try {
+      let storyWithBody = selectedStory;
+      if (!String(selectedStory.selftext || "").trim()) {
+        const postParams = new URLSearchParams({ permalink: selectedStory.permalink });
+        const postPayload = await api(`/api/reddit/thread?${postParams}`);
+        storyWithBody = postPayload.story || selectedStory;
+        setSelectedStory(storyWithBody);
+        setStories((current) =>
+          current.map((story) => (story.permalink === storyWithBody.permalink ? { ...story, ...storyWithBody } : story))
+        );
+      }
+
       const params = new URLSearchParams({
-        permalink: selectedStory.permalink,
-        title: selectedStory.title,
-        subreddit: selectedStory.subreddit || subreddit,
+        permalink: storyWithBody.permalink,
+        title: storyWithBody.title,
+        subreddit: storyWithBody.subreddit || subreddit,
         limit: "25"
       });
       const payload = await api(`/api/reddit/comments?${params}`);
@@ -213,18 +224,22 @@ function App() {
     const selectedComments = threadComments.filter((comment) => selectedCommentIds.includes(comment.id));
     if (selectedComments.length === 0) return selectedStory;
 
+    const postBody = String(selectedStory.selftext || "")
+      .replace(/\s+/g, " ")
+      .trim();
     const sections = selectedComments.map((comment, index) => {
       const author = showUsernames && comment.author ? ` by u/${comment.author}` : "";
       return `Comment ${index + 1}${author}. ${comment.selftext}`;
     });
-    const script = `${selectedStory.title}. ${sections.join(" ")}`;
+    const scriptParts = [selectedStory.title, postBody, sections.join(" ")].filter(Boolean);
+    const script = scriptParts.join(". ");
     return {
       ...selectedStory,
       id: `${selectedStory.id || "thread"}-combined-${selectedCommentIds.join("-")}`,
       title: `${selectedStory.title} (${selectedComments.length} comments)`,
       author: selectedComments.map((comment) => comment.author).filter(Boolean).join(", "),
       score: selectedComments.reduce((sum, comment) => sum + Number(comment.score || 0), 0),
-      selftext: sections.join("\n\n"),
+      selftext: [postBody, sections.join("\n\n")].filter(Boolean).join("\n\n"),
       script,
       estimatedSeconds: estimateSecondsFromText(script),
       source: "combined-thread-comments"
