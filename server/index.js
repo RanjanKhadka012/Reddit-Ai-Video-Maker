@@ -29,6 +29,50 @@ const jobs = new Map();
 
 ensureDataDirs();
 
+function normalizeWhitespace(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+async function hydrateStoryForRender(story) {
+  if (!story?.permalink) return story;
+
+  try {
+    const hydrated = await fetchThreadPost({
+      permalink: story.permalink,
+      userAgent:
+        process.env.REDDIT_USER_AGENT ||
+        "windows:reddit-video-maker:v1.0.0 by local_user",
+      clientId: process.env.REDDIT_CLIENT_ID,
+      clientSecret: process.env.REDDIT_CLIENT_SECRET
+    });
+    const body = normalizeWhitespace(hydrated.selftext);
+    if (!body) return story;
+
+    const existingScript = normalizeWhitespace(story.script);
+    const title = normalizeWhitespace(hydrated.title || story.title);
+    let script = hydrated.script || [title, body].filter(Boolean).join(". ");
+
+    if (existingScript && !existingScript.includes(body)) {
+      const withoutTitle = existingScript.startsWith(title)
+        ? existingScript.slice(title.length).replace(/^[.\s]+/, "")
+        : existingScript;
+      script = [title, body, withoutTitle].filter(Boolean).join(". ");
+    }
+
+    return {
+      ...story,
+      ...hydrated,
+      title: story.title || hydrated.title,
+      selftext: body,
+      script,
+      estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60))
+    };
+  } catch (error) {
+    console.warn(`Could not hydrate Reddit post before render: ${error.message}`);
+    return story;
+  }
+}
+
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use("/renders", express.static(rendersDir));
@@ -138,6 +182,7 @@ app.post("/api/render", async (request, response, next) => {
       elevenLabsVoiceId
     } = request.body;
     if (!story?.script) throw new Error("Choose a story before rendering.");
+    const renderStory = await hydrateStoryForRender(story);
     const useRedditCardOnly = visualMode === "reddit-card";
     const useComicPanels = visualMode === "comic";
     const useGeneratedPanels = useComicPanels && panelSource && panelSource !== "folder";
@@ -176,11 +221,11 @@ app.post("/api/render", async (request, response, next) => {
     const captionsPath = path.join(jobDir, "captions.ass");
     const outputPath = path.join(jobDir, "reddit-video.mp4");
     const comicBackgroundPath = path.join(jobDir, "comic-background.mp4");
-    const script = story.script;
+    const script = renderStory.script;
 
     runRenderJob({
       job,
-      story,
+      story: renderStory,
       script,
       audioPath,
       captionsPath,

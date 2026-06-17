@@ -220,23 +220,24 @@ function App() {
     setSelectedCommentIds(threadComments.slice(0, safeCount).map((comment) => comment.id));
   }
 
-  function combinedSelectedStory() {
+  function combinedSelectedStory(baseStory = selectedStory) {
+    if (!baseStory) return null;
     const selectedComments = threadComments.filter((comment) => selectedCommentIds.includes(comment.id));
-    if (selectedComments.length === 0) return selectedStory;
+    if (selectedComments.length === 0) return baseStory;
 
-    const postBody = String(selectedStory.selftext || "")
+    const postBody = String(baseStory.selftext || "")
       .replace(/\s+/g, " ")
       .trim();
     const sections = selectedComments.map((comment, index) => {
       const author = showUsernames && comment.author ? ` by u/${comment.author}` : "";
       return `Comment ${index + 1}${author}. ${comment.selftext}`;
     });
-    const scriptParts = [selectedStory.title, postBody, sections.join(" ")].filter(Boolean);
+    const scriptParts = [baseStory.title, postBody, sections.join(" ")].filter(Boolean);
     const script = scriptParts.join(". ");
     return {
-      ...selectedStory,
-      id: `${selectedStory.id || "thread"}-combined-${selectedCommentIds.join("-")}`,
-      title: `${selectedStory.title} (${selectedComments.length} comments)`,
+      ...baseStory,
+      id: `${baseStory.id || "thread"}-combined-${selectedCommentIds.join("-")}`,
+      title: `${baseStory.title} (${selectedComments.length} comments)`,
       author: selectedComments.map((comment) => comment.author).filter(Boolean).join(", "),
       score: selectedComments.reduce((sum, comment) => sum + Number(comment.score || 0), 0),
       selftext: [postBody, sections.join("\n\n")].filter(Boolean).join("\n\n"),
@@ -244,6 +245,18 @@ function App() {
       estimatedSeconds: estimateSecondsFromText(script),
       source: "combined-thread-comments"
     };
+  }
+
+  async function hydrateStoryBody(story) {
+    if (!story?.permalink || String(story.selftext || "").trim()) return story;
+    const postParams = new URLSearchParams({ permalink: story.permalink });
+    const postPayload = await api(`/api/reddit/thread?${postParams}`);
+    const hydrated = { ...story, ...(postPayload.story || {}) };
+    setSelectedStory(hydrated);
+    setStories((current) =>
+      current.map((item) => (item.permalink === hydrated.permalink ? { ...item, ...hydrated } : item))
+    );
+    return hydrated;
   }
 
   const storyForRender = selectedStory ? combinedSelectedStory() : null;
@@ -277,7 +290,16 @@ function App() {
       return;
     }
 
-    await renderStory(storyForRender);
+    setBusy(true);
+    setStatus("Loading full post body...");
+    try {
+      const hydratedStory = await hydrateStoryBody(selectedStory);
+      setBusy(false);
+      await renderStory(combinedSelectedStory(hydratedStory));
+    } catch (error) {
+      setStatus(error.message);
+      setBusy(false);
+    }
   }
 
   async function renderStory(storyToRender) {
