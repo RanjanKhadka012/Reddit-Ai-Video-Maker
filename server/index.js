@@ -72,7 +72,7 @@ async function hydrateStoryForRender(story) {
 
     const existingScript = normalizeWhitespace(story.script);
     const title = normalizeWhitespace(hydrated.title || story.title);
-    let script = hydrated.script || [title, body].filter(Boolean).join(". ");
+    let script = existingScript || hydrated.script || [title, body].filter(Boolean).join(". ");
 
     if (existingScript && !existingScript.includes(body)) {
       const withoutTitle = existingScript.startsWith(title)
