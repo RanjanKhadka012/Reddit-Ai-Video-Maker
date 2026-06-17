@@ -59,6 +59,7 @@ function App() {
   const [threadComments, setThreadComments] = React.useState([]);
   const [selectedCommentIds, setSelectedCommentIds] = React.useState([]);
   const [commentCount, setCommentCount] = React.useState(3);
+  const [showUsernames, setShowUsernames] = React.useState(false);
   const [backgrounds, setBackgrounds] = React.useState([]);
   const [background, setBackground] = React.useState("");
   const [comicPanels, setComicPanels] = React.useState([]);
@@ -213,7 +214,7 @@ function App() {
     if (selectedComments.length === 0) return selectedStory;
 
     const sections = selectedComments.map((comment, index) => {
-      const author = comment.author ? ` by u/${comment.author}` : "";
+      const author = showUsernames && comment.author ? ` by u/${comment.author}` : "";
       return `Comment ${index + 1}${author}. ${comment.selftext}`;
     });
     const script = `${selectedStory.title}. ${sections.join(" ")}`;
@@ -531,6 +532,14 @@ function App() {
                             )
                           )}
                         </select>
+                      </label>
+                      <label className="toggle-row">
+                        <input
+                          type="checkbox"
+                          checked={showUsernames}
+                          onChange={(event) => setShowUsernames(event.target.checked)}
+                        />
+                        <span>Show usernames in narration/captions</span>
                       </label>
                       <div className="comment-list">
                         {threadComments.map((comment) => (

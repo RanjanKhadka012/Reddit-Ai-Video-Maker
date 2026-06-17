@@ -265,6 +265,10 @@ async function runRenderJob({
       layout: layout || "tiktok",
       captionMode: visualMode === "comic" ? "keyword" : "full",
       timedLines: ttsResult.timings,
+      introTitle: {
+        title: story.title || "Reddit Story",
+        subreddit: story.subreddit || "reddit"
+      },
       card:
         visualMode === "reddit-card"
           ? {

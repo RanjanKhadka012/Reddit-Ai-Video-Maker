@@ -252,29 +252,50 @@ function keywordCaptionLines(script, totalSeconds) {
   }));
 }
 
-function keywordFromText(text) {
+function stripCommentLeadIn(text) {
+  return String(text || "")
+    .replace(/^comment\s+\d+(\s+by\s+u\/?[a-z0-9_-]+)?[.:]\s*/i, "")
+    .replace(/^u\/[a-z0-9_-]+[.:]\s*/i, "")
+    .trim();
+}
+
+function phraseFromText(text) {
   const words = String(text || "")
+    .replace(/^comment\s+\d+(\s+by\s+u\/?[a-z0-9_-]+)?[.:]\s*/i, "")
+    .replace(/^u\/[a-z0-9_-]+[.:]\s*/i, "")
     .split(/\s+/)
     .map((word) => word.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ""))
     .filter(Boolean);
   const usable = words.filter((word) => word.length > 2 && !keywordStopWords.has(word.toLowerCase()));
   const source = usable.length ? usable : words;
-  const picked = source
-    .sort((a, b) => b.length - a.length)
-    .slice(0, source[0]?.length <= 4 ? 2 : 1)
-    .join(" ");
-  return (picked || words.slice(0, 2).join(" ") || "STORY").toUpperCase();
+  const picked = source.slice(0, 5).join(" ");
+  return (picked || words.slice(0, 5).join(" ") || "STORY").toUpperCase();
 }
 
 function timedCaptionLines(timings, totalSeconds, captionMode) {
   if (!Array.isArray(timings) || timings.length === 0) return null;
   return timings
     .map((line) => ({
-      text: captionMode === "keyword" ? keywordFromText(line.text) : line.text,
+      text: captionMode === "keyword" ? phraseFromText(line.text) : line.text,
       start: Math.max(0, Math.min(totalSeconds, Number(line.start) || 0)),
       end: Math.max(0, Math.min(totalSeconds, Number(line.end) || 0))
     }))
     .filter((line) => line.end > line.start);
+}
+
+function titleCardEvent({ title, subreddit, totalSeconds, layout }) {
+  if (!title) return "";
+  const maxChars = layout === "youtube" ? 46 : 28;
+  const lines = wrapText(title, maxChars).slice(0, layout === "youtube" ? 3 : 5);
+  const meta = subreddit ? `r/${subreddit}` : "Reddit";
+  const text = [meta, "", ...lines].join("\\N");
+  const end = Math.min(totalSeconds, layout === "youtube" ? 4.2 : 4.8);
+  return `Dialogue: 3,0:00:00.00,${assTime(end)},TitleCard,,0,0,0,,${assEscape(text)}`;
+}
+
+function titleCardEndSeconds({ title, totalSeconds, layout }) {
+  if (!title) return 0;
+  return Math.min(totalSeconds, layout === "youtube" ? 4.2 : 4.8);
 }
 
 function redditCardEvents({ card, totalSeconds, layout }) {
@@ -293,12 +314,27 @@ function redditCardEvents({ card, totalSeconds, layout }) {
   return `Dialogue: 0,0:00:00.00,${assTime(totalSeconds)},RedditCard,,0,0,0,,${assEscape(cardText.join("\\N"))}`;
 }
 
-export async function writeAssCaptions({ script, outputPath, totalSeconds, layout, card, captionMode, timedLines }) {
+export async function writeAssCaptions({ script, outputPath, totalSeconds, layout, card, captionMode, timedLines, introTitle }) {
   const spec = layoutSpec(layout);
   const cardEvent = redditCardEvents({ card, totalSeconds, layout });
-  const lineSource =
+  const titleEvent = titleCardEvent({
+    title: introTitle?.title,
+    subreddit: introTitle?.subreddit,
+    totalSeconds,
+    layout
+  });
+  const introEnd = titleCardEndSeconds({ title: introTitle?.title, totalSeconds, layout });
+  const lineSourceRaw =
     timedCaptionLines(timedLines, totalSeconds, captionMode) ||
     (captionMode === "keyword" ? keywordCaptionLines(script, totalSeconds) : captionLines(script, totalSeconds));
+  const lineSource = introEnd
+    ? lineSourceRaw
+        .filter((line) => line.start >= introEnd || line.end > introEnd + 1)
+        .map((line) => ({
+          ...line,
+          start: line.start < introEnd ? introEnd : line.start
+        }))
+    : lineSourceRaw;
   const captionStyle = captionMode === "keyword" ? "Keyword" : "Caption";
   const captionEvents = lineSource
     .map(
@@ -306,10 +342,11 @@ export async function writeAssCaptions({ script, outputPath, totalSeconds, layou
         `Dialogue: 1,${assTime(line.start)},${assTime(line.end)},${captionStyle},,0,0,0,,${assEscape(line.text)}`
     )
     .join("\n");
-  const events = [cardEvent, captionEvents].filter(Boolean).join("\n");
+  const events = [cardEvent, titleEvent, captionEvents].filter(Boolean).join("\n");
   const cardFontSize = layout === "youtube" ? 38 : 44;
   const cardMarginV = layout === "youtube" ? 70 : 150;
-  const keywordFontSize = layout === "youtube" ? 82 : 112;
+  const titleFontSize = layout === "youtube" ? 62 : 70;
+  const keywordFontSize = layout === "youtube" ? 64 : 82;
   const keywordMarginV = layout === "youtube" ? 210 : 540;
 
   const content = `[Script Info]
@@ -322,6 +359,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Caption,Arial,${spec.fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H7A000000,-1,0,0,0,100,100,0,0,1,5,2,2,80,80,${spec.marginV},1
 Style: Keyword,Arial Black,${keywordFontSize},&H00004DFF,&H000000FF,&H00000000,&H7A000000,-1,0,0,0,100,100,0,0,1,8,3,2,80,80,${keywordMarginV},1
 Style: RedditCard,Arial,${cardFontSize},&H001A1A1B,&H000000FF,&H00FFFFFF,&H00FFFFFF,0,0,0,0,100,100,0,0,3,14,0,8,${layout === "youtube" ? 360 : 90},${layout === "youtube" ? 360 : 90},${cardMarginV},1
+Style: TitleCard,Arial Black,${titleFontSize},&H00FFFFFF,&H000000FF,&H00000000,&HC0000000,-1,0,0,0,100,100,0,0,3,16,2,5,${layout === "youtube" ? 320 : 95},${layout === "youtube" ? 320 : 95},0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -436,6 +474,8 @@ export async function renderVideo({ backgroundPath, audioPath, captionPath, outp
     "21",
     "-pix_fmt",
     "yuv420p",
+    "-af",
+    "loudnorm=I=-16:LRA=11:TP=-1.5",
     "-c:a",
     "aac",
     "-b:a",

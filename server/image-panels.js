@@ -6,19 +6,19 @@ const defaultComfyUrl = "http://127.0.0.1:8188";
 
 const stylePrompts = {
   comic:
-    "vertical comic book panel, dramatic Reddit story illustration, bold ink outlines, expressive characters, cinematic lighting, high contrast, no text, no watermark",
+    "vertical comic book panel, consistent modern classroom/story illustration style, grounded everyday Reddit story scene, bold ink outlines, expressive normal people, cinematic lighting, high contrast, no text, no watermark",
   stickman:
-    "vertical MS Paint style stickman drawing, simple white background, rough mouse-drawn lines, funny expressive stick figures, no text, no watermark",
+    "vertical MS Paint style stickman drawing, consistent simple white background, rough mouse-drawn lines, funny expressive stick figures acting out the story, no text, no watermark",
   horror:
-    "vertical horror comic panel, tense atmosphere, dramatic shadows, cinematic lighting, expressive character, bold ink outlines, no text, no watermark",
+    "vertical horror comic panel, consistent grounded realistic setting, tense atmosphere, dramatic shadows, cinematic lighting, expressive character, bold ink outlines, no text, no watermark",
   webtoon:
-    "vertical modern webtoon panel, clean anime-inspired illustration, expressive character acting, cinematic composition, no text, no watermark",
+    "vertical modern webtoon panel, consistent clean anime-inspired illustration, expressive character acting, grounded everyday setting, cinematic composition, no text, no watermark",
   cartoon:
-    "vertical simple cartoon panel, clean colorful shapes, expressive character, storybook composition, no text, no watermark"
+    "vertical simple cartoon panel, consistent clean colorful shapes, expressive character, grounded storybook composition, no text, no watermark"
 };
 
 const negativePrompt =
-  "text, captions, speech bubbles, watermark, logo, blurry, distorted hands, extra fingers, low quality, cropped face";
+  "text, captions, speech bubbles, watermark, logo, blurry, distorted hands, extra fingers, low quality, cropped face, sci-fi armor, robots, soldiers, war battle, fantasy creatures, unrelated action scene";
 
 function safeComfyUrl(url) {
   const value = String(url || defaultComfyUrl).trim();
@@ -29,6 +29,8 @@ function safeComfyUrl(url) {
 function sceneSentences(script) {
   return String(script || "")
     .replace(/\s+/g, " ")
+    .replace(/comment\s+\d+(\s+by\s+u\/?[a-z0-9_-]+)?[.:]\s*/gi, "")
+    .replace(/u\/[a-z0-9_-]+[.:]\s*/gi, "")
     .split(/(?<=[.!?])\s+/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence.length > 20);
@@ -39,11 +41,12 @@ export function createScenePrompts({ script, title, panelCount, style }) {
   const count = Math.max(2, Math.min(24, Number(panelCount) || 8));
   const baseStyle = stylePrompts[style] || stylePrompts.comic;
   const storyTitle = String(title || "Reddit story").replace(/\s+/g, " ").trim();
+  const styleLock = `Use this same visual style for every panel: ${style || "comic"}. Keep the scene directly related to the Reddit thread.`;
 
   if (!sentences.length) {
     return Array.from({ length: count }, (_item, index) => ({
       scene: `A dramatic moment from the story, scene ${index + 1}.`,
-      prompt: `${baseStyle}. Reddit thread title: ${storyTitle}. Scene ${index + 1}: A dramatic moment from the story.`
+      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Scene ${index + 1}: A dramatic moment from the story.`
     }));
   }
 
@@ -61,9 +64,14 @@ export function createScenePrompts({ script, title, panelCount, style }) {
     const trimmedScene = scene.length > 420 ? `${scene.slice(0, 420)}...` : scene;
     return {
       scene: trimmedScene,
-      prompt: `${baseStyle}. Reddit thread title: ${storyTitle}. Illustrate this exact story moment as a single scene: ${trimmedScene}`
+      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Illustrate this exact story moment as a single scene: ${trimmedScene}`
     };
   });
+}
+
+async function imageLooksUsable(filePath) {
+  const stats = await fs.stat(filePath).catch(() => null);
+  return Boolean(stats && stats.size > 20_000);
 }
 
 async function downloadImage(url, outputPath) {
@@ -106,6 +114,10 @@ export async function generatePollinationsPanels({ prompts, outputDir, layout, o
     const encodedPrompt = encodeURIComponent(item.prompt);
     const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
     await downloadImage(url, outputPath);
+    if (!(await imageLooksUsable(outputPath))) {
+      const retryUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed + 101}&nologo=true`;
+      await downloadImage(retryUrl, outputPath);
+    }
     panelPaths.push(outputPath);
     onProgress?.((index + 1) / prompts.length);
   }
@@ -268,6 +280,19 @@ export async function generateComfyPanels({
     const image = await waitForComfyImage({ baseUrl, promptId });
     const outputPath = path.join(outputDir, `generated-${String(index + 1).padStart(2, "0")}.png`);
     await saveComfyImage({ baseUrl, image, outputPath });
+    if (!(await imageLooksUsable(outputPath))) {
+      const retryWorkflow = comfyWorkflow({
+        prompt: `${item.prompt}. Make the scene clearer and more directly related to the Reddit story.`,
+        checkpoint: selectedCheckpoint,
+        seed: Math.floor(Math.random() * 1_000_000_000),
+        width,
+        height,
+        steps: Math.max(8, Math.min(40, Number(steps) || 18))
+      });
+      const retryPromptId = await queueComfyPrompt({ baseUrl, workflow: retryWorkflow, clientId });
+      const retryImage = await waitForComfyImage({ baseUrl, promptId: retryPromptId });
+      await saveComfyImage({ baseUrl, image: retryImage, outputPath });
+    }
     panelPaths.push(outputPath);
     onProgress?.((index + 1) / prompts.length);
   }
