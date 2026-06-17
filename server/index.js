@@ -33,6 +33,28 @@ function normalizeWhitespace(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+const bodyRequiredSubreddits = new Set([
+  "aitah",
+  "amitheasshole",
+  "trueoffmychest",
+  "offmychest",
+  "relationship_advice",
+  "relationships",
+  "tifu",
+  "confession",
+  "pettyrevenge",
+  "prorevenge",
+  "maliciouscompliance",
+  "nosleep",
+  "letsnotmeet"
+]);
+
+function isTitleOnly(story) {
+  const titleWords = normalizeWhitespace(story?.title).split(/\s+/).filter(Boolean).length;
+  const scriptWords = normalizeWhitespace(story?.script).split(/\s+/).filter(Boolean).length;
+  return scriptWords <= titleWords + 3;
+}
+
 async function hydrateStoryForRender(story) {
   if (!story?.permalink) return story;
 
@@ -46,7 +68,7 @@ async function hydrateStoryForRender(story) {
       clientSecret: process.env.REDDIT_CLIENT_SECRET
     });
     const body = normalizeWhitespace(hydrated.selftext);
-    if (!body) return story;
+    if (!body) return { ...story, postBodyMissing: true };
 
     const existingScript = normalizeWhitespace(story.script);
     const title = normalizeWhitespace(hydrated.title || story.title);
@@ -64,6 +86,7 @@ async function hydrateStoryForRender(story) {
       ...hydrated,
       title: story.title || hydrated.title,
       selftext: body,
+      postBodyHydrated: true,
       script,
       estimatedSeconds: Math.max(30, Math.round((script.split(/\s+/).length / 145) * 60))
     };
@@ -183,6 +206,12 @@ app.post("/api/render", async (request, response, next) => {
     } = request.body;
     if (!story?.script) throw new Error("Choose a story before rendering.");
     const renderStory = await hydrateStoryForRender(story);
+    const subredditKey = normalizeWhitespace(renderStory.subreddit).toLowerCase();
+    if (bodyRequiredSubreddits.has(subredditKey) && (renderStory.postBodyMissing || isTitleOnly(renderStory))) {
+      throw new Error(
+        `Could not load the full post body from r/${renderStory.subreddit}. Paste the Reddit post link with Load Post, or paste the story into Manual Script.`
+      );
+    }
     const useRedditCardOnly = visualMode === "reddit-card";
     const useComicPanels = visualMode === "comic";
     const useGeneratedPanels = useComicPanels && panelSource && panelSource !== "folder";

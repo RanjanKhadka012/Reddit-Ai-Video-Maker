@@ -232,6 +232,37 @@ function parseOldRedditListing(html, subreddit, count) {
   return posts;
 }
 
+function parseOldRedditPostPage(html, path) {
+  const subreddit = path.match(/\/r\/([^/]+)/i)?.[1] || "reddit";
+  const postBlock =
+    html.match(/<div class=" thing id-t3_[\s\S]*?(?=<div class="sitetable nestedlisting"|<div class="commentarea"|thing id-t1_|$)/)?.[0] ||
+    html;
+  const titleMatch =
+    postBlock.match(/<a class="title[^"]*"[^>]*>([\s\S]*?)<\/a>/) ||
+    html.match(/<title>([\s\S]*?)<\/title>/);
+  const idMatch = postBlock.match(/data-fullname="t3_([^"]+)"/) || path.match(/comments\/([^/]+)/i);
+  const authorMatch = postBlock.match(/data-author="([^"]+)"/);
+  const scoreMatch = postBlock.match(/data-score="(\d+)"/);
+  const commentsMatch = postBlock.match(/data-comments-count="(\d+)"/);
+  const bodyMatch =
+    postBlock.match(/usertext-body[\s\S]*?<div class="md">([\s\S]*?)<\/div>\s*<\/div>/) ||
+    postBlock.match(/<div class="md"[^>]*>([\s\S]*?)<\/div>/);
+
+  const title = stripTags(titleMatch?.[1] || "Reddit Thread").replace(/\s*:\s*reddit\s*$/i, "");
+  const selftext = bodyMatch ? stripTags(bodyMatch[1]) : "";
+
+  return {
+    id: Array.isArray(idMatch) ? idMatch[1] : `manual-${Date.now()}`,
+    title,
+    author: decodeHtml(authorMatch?.[1] || "old-reddit"),
+    score: Number(scoreMatch?.[1] || 0),
+    num_comments: Number(commentsMatch?.[1] || 0),
+    subreddit,
+    permalink: path,
+    selftext
+  };
+}
+
 function parseOldRedditComments(html, post, count) {
   const comments = [];
   const blocks = html.match(/thing id-t1_[\s\S]*?(?=thing id-t1_|<div class="morechildren"|$)/g) || [];
@@ -357,7 +388,7 @@ export async function fetchThreadPost({ permalink, userAgent, clientId, clientSe
   }
 
   const html = await fetchOldRedditHtml(path, userAgent);
-  const post = parseOldRedditListing(html, path.match(/\/r\/([^/]+)/i)?.[1] || "reddit", 1)[0];
+  const post = parseOldRedditPostPage(html, path);
   if (!post) throw new Error("Could not read that Reddit post.");
   return postToStory(post, "manual-link-post");
 }
