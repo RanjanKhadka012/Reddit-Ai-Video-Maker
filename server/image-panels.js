@@ -6,19 +6,19 @@ const defaultComfyUrl = "http://127.0.0.1:8188";
 
 const stylePrompts = {
   comic:
-    "vertical comic book panel, consistent modern classroom/story illustration style, grounded everyday Reddit story scene, bold ink outlines, expressive normal people, cinematic lighting, high contrast, no text, no watermark",
+    "single full-frame vertical comic book illustration, graphic novel style, grounded everyday Reddit story scene, bold ink outlines, expressive normal people, cinematic lighting, high contrast, clean readable composition, no text, no watermark",
   stickman:
-    "vertical MS Paint style stickman drawing, consistent simple white background, rough mouse-drawn lines, funny expressive stick figures acting out the story, no text, no watermark",
+    "single full-frame vertical MS Paint style stickman drawing, consistent simple white background, rough mouse-drawn lines, funny expressive stick figures acting out the story, no text, no watermark",
   horror:
-    "vertical horror comic panel, consistent grounded realistic setting, tense atmosphere, dramatic shadows, cinematic lighting, expressive character, bold ink outlines, no text, no watermark",
+    "single full-frame vertical horror comic illustration, grounded realistic setting, tense atmosphere, dramatic shadows, cinematic lighting, expressive character, bold ink outlines, no text, no watermark",
   webtoon:
-    "vertical modern webtoon panel, consistent clean anime-inspired illustration, expressive character acting, grounded everyday setting, cinematic composition, no text, no watermark",
+    "single full-frame vertical modern webtoon illustration, clean anime-inspired style, expressive character acting, grounded everyday setting, cinematic composition, no text, no watermark",
   cartoon:
-    "vertical simple cartoon panel, consistent clean colorful shapes, expressive character, grounded storybook composition, no text, no watermark"
+    "single full-frame vertical simple cartoon illustration, clean colorful shapes, expressive character, grounded storybook composition, no text, no watermark"
 };
 
 const negativePrompt =
-  "text, captions, speech bubbles, watermark, logo, blurry, distorted hands, extra fingers, low quality, cropped face, sci-fi armor, robots, soldiers, war battle, fantasy creatures, unrelated action scene";
+  "text, captions, speech bubbles, watermark, logo, blurry, distorted hands, extra fingers, low quality, cropped face, collage, storyboard grid, many tiny panels, manga page layout, comic page layout, map, diagram, infographic, document wall, corkboard, evidence board, abstract background, sci-fi armor, robots, soldiers, war battle, fantasy creatures, unrelated action scene";
 
 function safeComfyUrl(url) {
   const value = String(url || defaultComfyUrl).trim();
@@ -36,17 +36,82 @@ function sceneSentences(script) {
     .filter((sentence) => sentence.length > 20);
 }
 
+function compactText(value, maxLength = 260) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
+}
+
+function inferNarratorDescription(text) {
+  const source = String(text || "");
+  const ageGender = source.match(/\b(?:i\s*(?:am|'m)?\s*)?\(?([1-9][0-9])\s*([fFmM])\)?\b/);
+  if (ageGender) {
+    const age = ageGender[1];
+    const gender = ageGender[2].toLowerCase() === "f" ? "woman" : "man";
+    return `the same ${age}-year-old ${gender} narrator/protagonist`;
+  }
+
+  if (/\b(my husband|my boyfriend|pregnant|wife|girlfriend)\b/i.test(source)) {
+    return "the same adult woman narrator/protagonist";
+  }
+
+  if (/\b(my wife|my girlfriend|husband|boyfriend)\b/i.test(source)) {
+    return "the same adult man narrator/protagonist";
+  }
+
+  if (/\bteacher|student|school|classroom\b/i.test(source)) {
+    return "the same ordinary teacher or student narrator/protagonist";
+  }
+
+  return "the same ordinary adult narrator/protagonist";
+}
+
+function inferMainSetting(text) {
+  const source = String(text || "").toLowerCase();
+  if (source.includes("therapist") || source.includes("therapy")) return "a therapist office and quiet personal memory scenes";
+  if (source.includes("school") || source.includes("teacher") || source.includes("classroom")) return "a realistic school or classroom";
+  if (source.includes("work") || source.includes("boss") || source.includes("coworker") || source.includes("office")) {
+    return "a realistic workplace or office";
+  }
+  if (source.includes("wedding")) return "a wedding venue or family gathering";
+  if (source.includes("family") || source.includes("mom") || source.includes("dad") || source.includes("sister") || source.includes("brother")) {
+    return "a realistic family home";
+  }
+  if (source.includes("restaurant") || source.includes("dinner")) return "a restaurant or dinner table";
+  return "a believable real-world setting from the story";
+}
+
+function storyVisualBible({ script, title, style }) {
+  const combined = `${title || ""}. ${script || ""}`;
+  const protagonist = inferNarratorDescription(combined);
+  const setting = inferMainSetting(combined);
+  const palette =
+    style === "horror"
+      ? "muted dark colors with tense shadows"
+      : style === "stickman"
+        ? "simple black lines on white"
+        : "consistent warm natural colors";
+
+  return [
+    `Character continuity: show ${protagonist} in every panel unless the scene clearly requires another person.`,
+    "Keep the protagonist's hair, outfit, age, and face consistent across all panels.",
+    `Main setting: ${setting}.`,
+    `Visual continuity: ${palette}, same camera language, same illustration style for the whole video.`,
+    "Each image must be one coherent scene, not a collage, not a map, not a page of many panels."
+  ].join(" ");
+}
+
 export function createScenePrompts({ script, title, panelCount, style }) {
   const sentences = sceneSentences(script);
   const count = Math.max(2, Math.min(24, Number(panelCount) || 8));
   const baseStyle = stylePrompts[style] || stylePrompts.comic;
   const storyTitle = String(title || "Reddit story").replace(/\s+/g, " ").trim();
-  const styleLock = `Use this same visual style for every panel: ${style || "comic"}. Keep the scene directly related to the Reddit thread.`;
+  const visualBible = storyVisualBible({ script, title, style });
+  const styleLock = `Use this same visual style for every panel: ${style || "comic"}. ${visualBible}`;
 
   if (!sentences.length) {
     return Array.from({ length: count }, (_item, index) => ({
       scene: `A dramatic moment from the story, scene ${index + 1}.`,
-      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Scene ${index + 1}: A dramatic moment from the story.`
+      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Scene ${index + 1}: show the protagonist reacting to a dramatic moment from the story as one cinematic scene.`
     }));
   }
 
@@ -61,10 +126,13 @@ export function createScenePrompts({ script, title, panelCount, style }) {
   }
 
   return chunks.slice(0, count).map((scene) => {
-    const trimmedScene = scene.length > 420 ? `${scene.slice(0, 420)}...` : scene;
+    const trimmedScene = compactText(scene, 420);
     return {
       scene: trimmedScene,
-      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Illustrate this exact story moment as a single scene: ${trimmedScene}`
+      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Story context: ${compactText(
+        script,
+        650
+      )}. Illustrate this exact moment as one cinematic scene with the same protagonist acting or reacting: ${trimmedScene}`
     };
   });
 }
@@ -115,7 +183,10 @@ export async function generatePollinationsPanels({ prompts, outputDir, layout, o
     const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
     await downloadImage(url, outputPath);
     if (!(await imageLooksUsable(outputPath))) {
-      const retryUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed + 101}&nologo=true`;
+      const retryPrompt = encodeURIComponent(
+        `${item.prompt}. Regenerate as a clear single scene focused on the same protagonist, no collage, no map, no document wall.`
+      );
+      const retryUrl = `https://image.pollinations.ai/prompt/${retryPrompt}?width=${width}&height=${height}&seed=${seed + 101}&nologo=true`;
       await downloadImage(retryUrl, outputPath);
     }
     panelPaths.push(outputPath);
@@ -282,7 +353,7 @@ export async function generateComfyPanels({
     await saveComfyImage({ baseUrl, image, outputPath });
     if (!(await imageLooksUsable(outputPath))) {
       const retryWorkflow = comfyWorkflow({
-        prompt: `${item.prompt}. Make the scene clearer and more directly related to the Reddit story.`,
+        prompt: `${item.prompt}. Regenerate as a clear single scene focused on the same protagonist, no collage, no map, no document wall.`,
         checkpoint: selectedCheckpoint,
         seed: Math.floor(Math.random() * 1_000_000_000),
         width,
