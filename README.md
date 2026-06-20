@@ -1,6 +1,6 @@
 # Reddit Video Maker
 
-A local Windows desktop app that turns Reddit stories into captioned videos with TTS narration, animated backgrounds, and TikTok/YouTube layout options.
+A local desktop app that turns Reddit stories into captioned videos with TTS narration, animated backgrounds, and TikTok/YouTube layout options.
 
 ## Features
 
@@ -48,6 +48,30 @@ Build a portable Windows `.exe`:
 ```powershell
 npm run dist:win
 ```
+
+Build Linux installers on Linux:
+
+```bash
+npm install
+npm run dist:linux
+```
+
+The Linux build writes both:
+
+```text
+release/Reddit-Video-Maker-1.0.0.AppImage
+release/Reddit-Video-Maker-1.0.0.deb
+```
+
+Use the `.deb` for a normal click-to-install Ubuntu/Debian package. Use the `.AppImage` as a portable Linux app that can run without installing.
+
+You can also build the Linux installers from GitHub without setting up a Linux machine:
+
+1. Open the repository on GitHub.
+2. Go to `Actions`.
+3. Run `Build Linux Installer`.
+4. Download the `reddit-video-maker-linux-installers` artifact.
+5. On Ubuntu/Debian, double-click the `.deb` file to install it.
 
 The built app is written to:
 

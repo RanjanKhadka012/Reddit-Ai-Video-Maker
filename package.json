@@ -2,12 +2,16 @@
   "name": "reddit-video-maker",
   "version": "1.0.0",
   "private": true,
+  "author": "Ranjan Khadka <RanjanKhadka012@users.noreply.github.com>",
   "type": "module",
   "main": "electron-main.cjs",
   "scripts": {
     "dev": "npm run build && npm start",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win portable",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb",
+    "dist:linux:deb": "npm run build && electron-builder --linux deb",
+    "dist:linux:appimage": "npm run build && electron-builder --linux AppImage",
     "server": "node server/index.js",
     "client": "vite --host 127.0.0.1",
     "build": "vite build",
@@ -79,6 +83,24 @@
         "portable"
       ],
       "artifactName": "Reddit-Video-Maker-${version}-portable.${ext}"
+    },
+    "linux": {
+      "category": "AudioVideo",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "artifactName": "Reddit-Video-Maker-${version}.${ext}",
+      "synopsis": "Reddit story video maker",
+      "description": "Create narrated Reddit story videos with captions and generated panels."
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnss3",
+        "libxss1",
+        "libasound2"
+      ]
     }
   }
 }

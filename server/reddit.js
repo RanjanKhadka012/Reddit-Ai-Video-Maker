@@ -56,6 +56,10 @@ function psEscape(value = "") {
 }
 
 function fetchHtmlWithPowerShell(url) {
+  if (process.platform !== "win32") {
+    return Promise.reject(new Error("PowerShell Reddit fallback is only available on Windows."));
+  }
+
   const script = [
     "$ProgressPreference = 'SilentlyContinue'",
     "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",

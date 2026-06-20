@@ -1,0 +1,41 @@
+name: Build Linux Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Linux packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot dpkg rpm xz-utils ruby ruby-dev build-essential
+          sudo gem install --no-document fpm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Linux installers
+        run: npm run dist:linux
+
+      - name: Upload Linux installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: reddit-video-maker-linux-installers
+          path: |
+            release/*.AppImage
+            release/*.deb
