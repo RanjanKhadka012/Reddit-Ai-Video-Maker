@@ -478,6 +478,8 @@ export async function renderVideo({ backgroundPath, audioPath, captionPath, outp
     "loudnorm=I=-16:LRA=11:TP=-1.5",
     "-c:a",
     "aac",
+    "-ar",
+    "48000",
     "-b:a",
     "160k",
     "-progress",

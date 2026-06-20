@@ -10,6 +10,7 @@ import { appRoot, piperVoicesDir } from "./paths.js";
 const TIKTOK_TTS_URL = "https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/";
 const DEFAULT_ELEVENLABS_VOICE = "21m00Tcm4TlvDq8ikWAM";
 const DEFAULT_PIPER_MODEL = "en_US-lessac-medium.onnx";
+const SAFE_TTS_FILTER = "aresample=48000,volume=0.82,alimiter=limit=0.89";
 const ffmpegBin = unpackedBinaryPath(ffmpegPath);
 const ffprobeBin = unpackedBinaryPath(ffprobeStatic.path);
 
@@ -204,7 +205,7 @@ async function synthesizeWindowsFallback({ text, outputPath }) {
   ].join("; ");
 
   await run("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
-  await run(ffmpegBin, ["-y", "-i", wavPath, "-codec:a", "libmp3lame", "-b:a", "160k", outputPath]);
+  await run(ffmpegBin, ["-y", "-i", wavPath, "-af", SAFE_TTS_FILTER, "-codec:a", "libmp3lame", "-b:a", "160k", outputPath]);
   return { chunks: 1, provider: "windows-speech-fallback" };
 }
 
@@ -275,7 +276,7 @@ async function synthesizePiper({ text, outputPath, workDir, voice }) {
       "--sentence-silence",
       "0.15"
     ]);
-    await run(ffmpegBin, ["-y", "-i", wavPath, "-codec:a", "libmp3lame", "-b:a", "160k", outputPath]);
+    await run(ffmpegBin, ["-y", "-i", wavPath, "-af", SAFE_TTS_FILTER, "-codec:a", "libmp3lame", "-b:a", "160k", outputPath]);
     return { chunks: 1, provider: `piper-local:${path.basename(modelPath)}` };
   } finally {
     await fs.rm(textPath, { force: true }).catch(() => {});
@@ -464,6 +465,8 @@ async function concatAudioFiles({ files, outputPath, workDir }) {
     "0",
     "-i",
     concatPath,
+    "-af",
+    SAFE_TTS_FILTER,
     "-codec:a",
     "libmp3lame",
     "-b:a",
