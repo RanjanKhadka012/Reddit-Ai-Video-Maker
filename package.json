@@ -61,6 +61,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "piper-voices",
+        "to": "piper-voices",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "directories": {

@@ -26,6 +26,8 @@ const decodeHtml = (value = "") =>
       .replace(/&nbsp;/g, " ")
   );
 
+const decodeAttribute = (value = "") => decodeHtml(String(value || "").replace(/\\"/g, '"'));
+
 const stripTags = (html = "") =>
   decodeHtml(
     html
@@ -33,6 +35,21 @@ const stripTags = (html = "") =>
       .replace(/<\/p>/gi, "\n")
       .replace(/<[^>]+>/g, " ")
   );
+
+function normalizePermalink(value = "") {
+  const decoded = decodeAttribute(value);
+  if (!decoded) return "";
+  try {
+    const url = new URL(decoded, REDDIT_BASE);
+    return url.pathname;
+  } catch {
+    return decoded;
+  }
+}
+
+function hasUsefulRedditHtml(html = "") {
+  return /<shreddit-post\b/i.test(html) || /thing id-t3_/i.test(html) || /usertext-body/i.test(html);
+}
 
 function psEscape(value = "") {
   return String(value).replace(/'/g, "''");
@@ -188,11 +205,24 @@ async function fetchOldRedditHtml(path, userAgent) {
       });
 
       lastStatus = response.status;
-      if (response.ok) return response.text();
+      if (response.ok) {
+        const html = await response.text();
+        if (hasUsefulRedditHtml(html)) return html;
+      }
+    }
+
+    if (typeof globalThis.__RVM_BROWSER_FETCH__ === "function") {
+      try {
+        const html = await globalThis.__RVM_BROWSER_FETCH__(url);
+        if (hasUsefulRedditHtml(html)) return html;
+      } catch {
+        // Keep trying the remaining candidates.
+      }
     }
 
     try {
-      return await fetchHtmlWithPowerShell(url);
+      const html = await fetchHtmlWithPowerShell(url);
+      if (hasUsefulRedditHtml(html)) return html;
     } catch {
       // Keep trying the remaining candidates.
     }
@@ -232,8 +262,76 @@ function parseOldRedditListing(html, subreddit, count) {
   return posts;
 }
 
+function parseShredditListing(html, subreddit, count) {
+  const posts = [];
+  const blocks = html.match(/<shreddit-post\b[\s\S]*?<\/shreddit-post>/gi) || [];
+
+  for (const block of blocks) {
+    if (/over-18=["']?true/i.test(block)) continue;
+
+    const titleMatch =
+      block.match(/\bpost-title="([^"]+)"/i) ||
+      block.match(/\bpost-title='([^']+)'/i) ||
+      block.match(/<a[^>]+slot="title"[^>]*>([\s\S]*?)<\/a>/i);
+    const permalinkMatch =
+      block.match(/\bpermalink="([^"]+)"/i) ||
+      block.match(/\bpermalink='([^']+)'/i) ||
+      block.match(/\bcontent-href="([^"]+)"/i) ||
+      block.match(/\bcontent-href='([^']+)'/i) ||
+      block.match(/href="([^"]*\/comments\/[^"]+)"/i);
+    const idMatch = block.match(/\bid="t3_([^"]+)"/i) || block.match(/\/comments\/([^/"?]+)/i);
+    if (!titleMatch || !permalinkMatch || !idMatch) continue;
+
+    const scoreMatch = block.match(/\bscore="([^"]+)"/i);
+    const commentsMatch = block.match(/\bcomment-count="([^"]+)"/i);
+    const bodyMatch =
+      block.match(/<div[^>]+slot="text-body"[^>]*>([\s\S]*?)<\/div>/i) ||
+      block.match(/<div[^>]+class="[^"]*\bmd\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+
+    posts.push({
+      id: idMatch[1],
+      title: stripTags(titleMatch[1]),
+      permalink: normalizePermalink(permalinkMatch[1]),
+      score: Number(String(scoreMatch?.[1] || "0").replace(/[^\d-]/g, "")) || 0,
+      num_comments: Number(String(commentsMatch?.[1] || "0").replace(/[^\d-]/g, "")) || 0,
+      subreddit,
+      selftext: bodyMatch ? stripTags(bodyMatch[1]) : ""
+    });
+
+    if (posts.length >= count) break;
+  }
+
+  return posts;
+}
+
 function parseOldRedditPostPage(html, path) {
   const subreddit = path.match(/\/r\/([^/]+)/i)?.[1] || "reddit";
+  const shredditBlock = html.match(/<shreddit-post\b[\s\S]*?<\/shreddit-post>/i)?.[0] || "";
+  if (shredditBlock) {
+    const titleMatch =
+      shredditBlock.match(/\bpost-title="([^"]+)"/i) ||
+      shredditBlock.match(/\bpost-title='([^']+)'/i) ||
+      shredditBlock.match(/<a[^>]+slot="title"[^>]*>([\s\S]*?)<\/a>/i);
+    const idMatch = shredditBlock.match(/\bid="t3_([^"]+)"/i) || path.match(/comments\/([^/]+)/i);
+    const authorMatch = shredditBlock.match(/\bauthor="([^"]+)"/i);
+    const scoreMatch = shredditBlock.match(/\bscore="([^"]+)"/i);
+    const commentsMatch = shredditBlock.match(/\bcomment-count="([^"]+)"/i);
+    const bodyMatch =
+      shredditBlock.match(/<div[^>]+slot="text-body"[^>]*>([\s\S]*?)<\/div>/i) ||
+      shredditBlock.match(/<div[^>]+class="[^"]*\bmd\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+
+    return {
+      id: idMatch?.[1] || `manual-${Date.now()}`,
+      title: stripTags(titleMatch?.[1] || "Reddit Thread").replace(/\s*:\s*reddit\s*$/i, ""),
+      author: decodeAttribute(authorMatch?.[1] || "reddit"),
+      score: Number(String(scoreMatch?.[1] || "0").replace(/[^\d-]/g, "")) || 0,
+      num_comments: Number(String(commentsMatch?.[1] || "0").replace(/[^\d-]/g, "")) || 0,
+      subreddit,
+      permalink: path,
+      selftext: bodyMatch ? stripTags(bodyMatch[1]) : ""
+    };
+  }
+
   const postBlock =
     html.match(/<div class=" thing id-t3_[\s\S]*?(?=<div class="sitetable nestedlisting"|<div class="commentarea"|thing id-t1_|$)/)?.[0] ||
     html;
@@ -261,6 +359,40 @@ function parseOldRedditPostPage(html, path) {
     permalink: path,
     selftext
   };
+}
+
+function parseShredditComments(html, post, count) {
+  const comments = [];
+  const blocks = html.match(/<shreddit-comment\b[\s\S]*?<\/shreddit-comment>/gi) || [];
+
+  for (const block of blocks) {
+    const idMatch = block.match(/\bthingid="t1_([^"]+)"/i) || block.match(/\bid="t1_([^"]+)"/i);
+    const authorMatch = block.match(/\bauthor="([^"]+)"/i);
+    const scoreMatch = block.match(/\bscore="([^"]+)"/i);
+    const bodyMatch =
+      block.match(/<div[^>]+slot="comment"[^>]*>([\s\S]*?)<\/div>/i) ||
+      block.match(/<div[^>]+class="[^"]*\bmd\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    if (!idMatch || !bodyMatch) continue;
+
+    const body = stripTags(bodyMatch[1]);
+    const words = body.split(/\s+/).filter(Boolean);
+    if (words.length < 30) continue;
+
+    comments.push(commentToStory({
+      post,
+      comment: {
+        id: idMatch[1],
+        author: decodeAttribute(authorMatch?.[1] || "reddit"),
+        score: Number(String(scoreMatch?.[1] || "0").replace(/[^\d-]/g, "")) || 0,
+        body
+      },
+      source: "browser-thread-comment"
+    }));
+
+    if (comments.length >= count) break;
+  }
+
+  return comments;
 }
 
 function parseOldRedditComments(html, post, count) {
@@ -340,7 +472,10 @@ async function fetchStoriesFromOldReddit({ subreddit, sort, time, limit, userAge
   const count = Math.min(Math.max(Number(limit) || 12, 1), 25);
   const timeQuery = safeSort === "top" ? `?sort=top&t=${time}` : "";
   const listingHtml = await fetchOldRedditHtml(`/r/${subreddit}/${safeSort}/${timeQuery}`, userAgent);
-  const posts = parseOldRedditListing(listingHtml, subreddit, count);
+  const posts = [
+    ...parseOldRedditListing(listingHtml, subreddit, count),
+    ...parseShredditListing(listingHtml, subreddit, count)
+  ].slice(0, count);
   const stories = [];
 
   for (const post of posts) {
@@ -458,9 +593,19 @@ export async function fetchStories({ subreddit, sort, time, limit, userAgent, cl
     });
   }
 
-  return stories
+  const usableStories = stories
     .sort((a, b) => b.score - a.score)
     .slice(0, count);
+
+  if (usableStories.length > 0) return usableStories;
+
+  return fetchStoriesFromOldReddit({
+    subreddit: safeSubreddit,
+    sort: safeSort,
+    time: safeTime,
+    limit: count,
+    userAgent
+  });
 }
 
 export async function fetchThreadComments({
@@ -503,6 +648,9 @@ export async function fetchThreadComments({
   }
 
   const commentsHtml = await fetchOldRedditHtml(`${path}?sort=top`, userAgent);
+  const browserComments = parseShredditComments(commentsHtml, post, safeLimit);
+  if (browserComments.length) return browserComments.slice(0, safeLimit);
+
   return parseOldRedditComments(commentsHtml, post, safeLimit).map((comment) => ({
     ...comment,
     source: "old-reddit-thread-comment"

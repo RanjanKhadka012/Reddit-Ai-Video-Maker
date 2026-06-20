@@ -1,12 +1,29 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Film, Loader2, Play, RefreshCw, Search, Sparkles } from "lucide-react";
+import {
+  Clock3,
+  Download,
+  Film,
+  Layers3,
+  Loader2,
+  MessageCircle,
+  Play,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Wand2
+} from "lucide-react";
 import "./styles.css";
 
-const API = "http://127.0.0.1:4141";
+const API = window.location.port === "5173" ? "http://127.0.0.1:4141" : window.location.origin;
 
 const voices = [
   { id: "elevenlabs", label: "ElevenLabs" },
+  { id: "piper-local:en_US-lessac-medium.onnx", label: "Piper Lessac" },
+  { id: "piper-local:en_US-amy-medium.onnx", label: "Piper Amy" },
+  { id: "piper-local:en_US-joe-medium.onnx", label: "Piper Joe" },
+  { id: "piper-local:en_US-john-medium.onnx", label: "Piper John" },
+  { id: "piper-local:en_US-hfc_female-medium.onnx", label: "Piper HFC Female" },
   { id: "google-natural", label: "Natural Narrator" },
   { id: "en_us_001", label: "TikTok Jessie" },
   { id: "en_us_006", label: "TikTok Joey" },
@@ -66,6 +83,8 @@ function App() {
   const [panelSource, setPanelSource] = React.useState("folder");
   const [imageStyle, setImageStyle] = React.useState("comic");
   const [panelCount, setPanelCount] = React.useState(8);
+  const [characterBible, setCharacterBible] = React.useState(() => localStorage.getItem("characterBible") || "");
+  const [settingBible, setSettingBible] = React.useState(() => localStorage.getItem("settingBible") || "");
   const [comfyUrl, setComfyUrl] = React.useState(() => localStorage.getItem("comfyUrl") || "http://127.0.0.1:8188");
   const [comfyCheckpoint, setComfyCheckpoint] = React.useState(() => localStorage.getItem("comfyCheckpoint") || "");
   const [comfySteps, setComfySteps] = React.useState(18);
@@ -78,7 +97,6 @@ function App() {
   const [elevenLabsVoiceId, setElevenLabsVoiceId] = React.useState(
     () => localStorage.getItem("elevenLabsVoiceId") || "21m00Tcm4TlvDq8ikWAM"
   );
-  const [targetMinutes, setTargetMinutes] = React.useState(2.4);
   const [manualTitle, setManualTitle] = React.useState("Manual Reddit Story");
   const [manualScript, setManualScript] = React.useState("");
   const [status, setStatus] = React.useState("");
@@ -228,12 +246,12 @@ function App() {
     const postBody = String(baseStory.selftext || "")
       .replace(/\s+/g, " ")
       .trim();
-    const sections = selectedComments.map((comment, index) => {
-      const author = showUsernames && comment.author ? ` by u/${comment.author}` : "";
-      return `Comment ${index + 1}${author}. ${comment.selftext}`;
+    const sections = selectedComments.map((comment) => {
+      const author = showUsernames && comment.author ? `u/${comment.author}: ` : "";
+      return `${author}${comment.selftext}`;
     });
-    const scriptParts = [baseStory.title, postBody, sections.join(" ")].filter(Boolean);
-    const script = scriptParts.join(". ");
+    const scriptParts = [baseStory.title, postBody, ...sections].filter(Boolean);
+    const script = scriptParts.join("\n\n");
     return {
       ...baseStory,
       id: `${baseStory.id || "thread"}-combined-${selectedCommentIds.join("-")}`,
@@ -261,10 +279,15 @@ function App() {
 
   const storyForRender = selectedStory ? combinedSelectedStory() : null;
   const estimatedVideoSeconds = storyForRender?.estimatedSeconds || 0;
-  const effectiveTargetMinutes = Math.min(15, Math.max(Number(targetMinutes || 0), estimatedVideoSeconds / 60 + 0.5));
-  const cappedTargetSeconds = Math.round(effectiveTargetMinutes * 60);
+  const automaticTargetMinutes = Math.min(15, Math.max(0.5, estimatedVideoSeconds / 60 + 0.5));
+  const cappedTargetSeconds = Math.round(automaticTargetMinutes * 60);
   const estimateFill = Math.min(100, Math.round((estimatedVideoSeconds / 600) * 100));
   const downloadFilename = safeVideoFilename(renderResult?.title || storyForRender?.title || manualTitle);
+  const selectedWords = storyForRender?.script?.split(/\s+/).filter(Boolean).length || 0;
+
+  function targetMinutesForStory(story) {
+    return Math.min(15, Math.max(0.5, estimateSecondsFromText(story?.script || story?.selftext || "") / 60 + 0.5));
+  }
 
   async function renderVideo() {
     if (!selectedStory) {
@@ -336,12 +359,14 @@ function App() {
           story: storyToRender,
           background,
           voice,
-          targetMinutes: effectiveTargetMinutes,
+          targetMinutes: targetMinutesForStory(storyToRender),
           layout,
           visualMode,
           panelSource,
           imageStyle,
           panelCount,
+          characterBible: characterBible.trim(),
+          settingBible: settingBible.trim(),
           comfyUrl,
           comfyCheckpoint,
           comfySteps,
@@ -412,6 +437,14 @@ function App() {
   }, [elevenLabsVoiceId]);
 
   React.useEffect(() => {
+    localStorage.setItem("characterBible", characterBible);
+  }, [characterBible]);
+
+  React.useEffect(() => {
+    localStorage.setItem("settingBible", settingBible);
+  }, [settingBible]);
+
+  React.useEffect(() => {
     localStorage.setItem("comfyUrl", comfyUrl);
   }, [comfyUrl]);
 
@@ -423,15 +456,43 @@ function App() {
     <main className="app-shell">
       <section className="workspace">
         <header className="topbar">
-          <div>
-            <h1>Reddit Video Maker</h1>
-            <p>Fetch a story, choose a gameplay loop, and render a captioned vertical video.</p>
+          <div className="brand-block">
+            <span className="app-mark">
+              <Wand2 size={20} />
+            </span>
+            <div>
+              <h1>Reddit Video Maker</h1>
+              <p>Story sourcing, narration, captions, panels, and export in one focused studio.</p>
+            </div>
           </div>
           <button className="primary" onClick={renderVideo} disabled={busy}>
             {busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
             {selectedStory || manualScript.trim().split(/\s+/).filter(Boolean).length >= 80 ? "Render" : "Select Story"}
           </button>
         </header>
+
+        <div className="studio-metrics" aria-label="Project summary">
+          <div className="metric-card">
+            <Clock3 size={18} />
+            <span>Runtime</span>
+            <strong>{storyForRender ? formatDuration(estimatedVideoSeconds) : "--:--"}</strong>
+          </div>
+          <div className="metric-card">
+            <MessageCircle size={18} />
+            <span>Thread</span>
+            <strong>{selectedCommentIds.length || 0} comments</strong>
+          </div>
+          <div className="metric-card">
+            <Layers3 size={18} />
+            <span>Visual</span>
+            <strong>{visualMode === "comic" ? `${panelCount} images` : layout === "youtube" ? "16:9" : "9:16"}</strong>
+          </div>
+          <div className="metric-card">
+            <Sparkles size={18} />
+            <span>Script</span>
+            <strong>{selectedWords || 0} words</strong>
+          </div>
+        </div>
 
         <div className="control-strip">
           <label>
@@ -677,6 +738,22 @@ function App() {
                         />
                         <span className="range-readout">{panelCount} panels</span>
                       </label>
+                      <label>
+                        Character continuity
+                        <textarea
+                          value={characterBible}
+                          onChange={(event) => setCharacterBible(event.target.value)}
+                          placeholder="Example: Main narrator is a 28-year-old woman with shoulder-length black hair, green hoodie, tired expressive face, small silver necklace. Keep the same face, hair, outfit, and age in every image."
+                        />
+                      </label>
+                      <label>
+                        Scene continuity
+                        <textarea
+                          value={settingBible}
+                          onChange={(event) => setSettingBible(event.target.value)}
+                          placeholder="Example: Most scenes happen in the same small apartment kitchen at night, beige cabinets, round table, rainy window, warm overhead lighting. Only change location when the story clearly moves somewhere else."
+                        />
+                      </label>
                     </>
                   )}
                   {panelSource === "comfyui" ? (
@@ -782,18 +859,6 @@ function App() {
                   <option value="tiktok">TikTok / Shorts (9:16)</option>
                   <option value="youtube">YouTube (16:9)</option>
                 </select>
-              </label>
-              <label>
-                Target length
-                <input
-                  type="range"
-                  min="0.5"
-                  max="15"
-                  step="0.1"
-                  value={targetMinutes}
-                  onChange={(event) => setTargetMinutes(event.target.value)}
-                />
-                <span className="range-readout">{Number(targetMinutes).toFixed(1)} minutes</span>
               </label>
             </div>
 

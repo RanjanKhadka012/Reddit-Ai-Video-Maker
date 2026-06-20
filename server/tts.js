@@ -5,9 +5,11 @@ import ffmpegPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import * as googleTTS from "google-tts-api";
 import { unpackedBinaryPath } from "./binaries.js";
+import { appRoot, piperVoicesDir } from "./paths.js";
 
 const TIKTOK_TTS_URL = "https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/";
 const DEFAULT_ELEVENLABS_VOICE = "21m00Tcm4TlvDq8ikWAM";
+const DEFAULT_PIPER_MODEL = "en_US-lessac-medium.onnx";
 const ffmpegBin = unpackedBinaryPath(ffmpegPath);
 const ffprobeBin = unpackedBinaryPath(ffprobeStatic.path);
 
@@ -219,6 +221,68 @@ async function synthesizeGoogleTts({ text, outputPath }) {
   return { chunks: chunks.length, provider: "google-tts" };
 }
 
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolvePiperModel() {
+  return resolvePiperModelByName(DEFAULT_PIPER_MODEL);
+}
+
+async function resolvePiperModelByName(modelName = DEFAULT_PIPER_MODEL) {
+  const safeModelName = path.basename(String(modelName || DEFAULT_PIPER_MODEL));
+  const candidates = [
+    process.env.PIPER_MODEL_PATH,
+    path.join(piperVoicesDir, safeModelName),
+    path.join(appRoot, "piper-voices", safeModelName)
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (await fileExists(candidate)) return candidate;
+  }
+
+  throw new Error(
+    `Piper voice model not found. Expected ${safeModelName} in ${piperVoicesDir}.`
+  );
+}
+
+function piperModelFromVoice(voice) {
+  if (!String(voice || "").startsWith("piper-local:")) return DEFAULT_PIPER_MODEL;
+  return String(voice).slice("piper-local:".length);
+}
+
+async function synthesizePiper({ text, outputPath, workDir, voice }) {
+  const modelPath = await resolvePiperModelByName(piperModelFromVoice(voice));
+  const textPath = path.join(workDir || path.dirname(outputPath), `piper-input-${Date.now()}.txt`);
+  const wavPath = outputPath.replace(/\.[^.]+$/, "") + "-piper.wav";
+  await fs.writeFile(textPath, text, "utf8");
+
+  try {
+    await run(process.env.PIPER_PYTHON || "python", [
+      "-m",
+      "piper",
+      "--model",
+      modelPath,
+      "--input_file",
+      textPath,
+      "--output_file",
+      wavPath,
+      "--sentence-silence",
+      "0.15"
+    ]);
+    await run(ffmpegBin, ["-y", "-i", wavPath, "-codec:a", "libmp3lame", "-b:a", "160k", outputPath]);
+    return { chunks: 1, provider: `piper-local:${path.basename(modelPath)}` };
+  } finally {
+    await fs.rm(textPath, { force: true }).catch(() => {});
+    await fs.rm(wavPath, { force: true }).catch(() => {});
+  }
+}
+
 async function synthesizeElevenLabs({ text, outputPath, apiKey, voiceId }) {
   if (!apiKey) throw new Error("Add an ElevenLabs API key before using ElevenLabs voice.");
 
@@ -386,7 +450,10 @@ function alignmentToCaptionTimings(alignment, offsetSeconds = 0) {
 async function concatAudioFiles({ files, outputPath, workDir }) {
   const concatPath = path.join(workDir, "concat.txt");
   const concatContent = files
-    .map((chunkPath) => `file '${chunkPath.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`)
+    .map((chunkPath) => {
+      const absolutePath = path.resolve(chunkPath);
+      return `file '${absolutePath.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`;
+    })
     .join("\n");
   await fs.writeFile(concatPath, concatContent, "utf8");
   await run(ffmpegBin, [
@@ -423,6 +490,10 @@ export async function synthesizeTikTokTts({ text, voice, outputPath, elevenLabsA
     }
   }
 
+  if (String(voice || "").startsWith("piper-local")) {
+    return synthesizePiper({ text, outputPath, workDir: path.dirname(outputPath), voice });
+  }
+
   const chunks = splitForTts(text);
   const buffers = [];
 
@@ -452,6 +523,10 @@ async function synthesizeChunk({ text, outputPath, voice, elevenLabsApiKey, elev
   if (!voice || voice.startsWith("google")) {
     await fs.writeFile(outputPath, await googleChunkToBuffer(text));
     return { provider: "google-tts" };
+  }
+
+  if (String(voice || "").startsWith("piper-local")) {
+    return synthesizePiper({ text, outputPath, workDir: path.dirname(outputPath), voice });
   }
 
   await fs.writeFile(outputPath, await tiktokChunkToBuffer(text, voice));

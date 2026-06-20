@@ -6,19 +6,19 @@ const defaultComfyUrl = "http://127.0.0.1:8188";
 
 const stylePrompts = {
   comic:
-    "single full-frame vertical comic book illustration, graphic novel style, grounded everyday Reddit story scene, bold ink outlines, expressive normal people, cinematic lighting, high contrast, clean readable composition, no text, no watermark",
+    "single full-frame vertical inked story illustration, one uninterrupted camera shot, one image only, grounded everyday Reddit story scene, bold clean outlines, expressive normal people, cinematic lighting, high contrast, clean readable composition, no text, no watermark",
   stickman:
-    "single full-frame vertical MS Paint style stickman drawing, consistent simple white background, rough mouse-drawn lines, funny expressive stick figures acting out the story, no text, no watermark",
+    "single full-frame vertical MS Paint style stickman drawing, one uninterrupted camera shot, consistent simple white background, rough mouse-drawn lines, funny expressive stick figures acting out the story, no text, no watermark",
   horror:
-    "single full-frame vertical horror comic illustration, grounded realistic setting, tense atmosphere, dramatic shadows, cinematic lighting, expressive character, bold ink outlines, no text, no watermark",
+    "single full-frame vertical horror story illustration, one uninterrupted camera shot, one image only, grounded realistic setting, tense atmosphere, dramatic shadows, cinematic lighting, expressive character, bold ink outlines, no text, no watermark",
   webtoon:
-    "single full-frame vertical modern webtoon illustration, clean anime-inspired style, expressive character acting, grounded everyday setting, cinematic composition, no text, no watermark",
+    "single full-frame vertical modern character illustration, one uninterrupted camera shot, one image only, clean anime-inspired style, expressive character acting, grounded everyday setting, cinematic composition, no text, no watermark",
   cartoon:
-    "single full-frame vertical simple cartoon illustration, clean colorful shapes, expressive character, grounded storybook composition, no text, no watermark"
+    "single full-frame vertical simple cartoon illustration, one uninterrupted camera shot, clean colorful shapes, expressive character, grounded storybook composition, no text, no watermark"
 };
 
 const negativePrompt =
-  "text, captions, speech bubbles, watermark, logo, blurry, distorted hands, extra fingers, low quality, cropped face, collage, storyboard grid, many tiny panels, manga page layout, comic page layout, map, diagram, infographic, document wall, corkboard, evidence board, abstract background, sci-fi armor, robots, soldiers, war battle, fantasy creatures, unrelated action scene";
+  "(comic page:1.8), (manga page:1.8), (page layout:1.8), (storyboard grid:1.8), (multiple panels:1.8), (panel borders:1.7), (speech bubbles:1.7), (text:1.6), captions, dialogue balloons, watermark, logo, blurry, distorted hands, extra fingers, low quality, cropped face, collage, split screen, side by side scenes, before and after, many tiny panels, multiple frames, sequence of events, map, diagram, infographic, document wall, corkboard, evidence board, abstract background, sci-fi armor, robots, soldiers, war battle, fantasy creatures, unrelated action scene";
 
 function safeComfyUrl(url) {
   const value = String(url || defaultComfyUrl).trim();
@@ -39,6 +39,16 @@ function sceneSentences(script) {
 function compactText(value, maxLength = 260) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
+}
+
+function promptNote(value, maxLength = 700) {
+  return compactText(value, maxLength).replace(/[<>]/g, "");
+}
+
+function singleSceneFocus(scene) {
+  const sentences = sceneSentences(scene);
+  const focus = sentences[0] || String(scene || "");
+  return compactText(focus, 210).replace(/[.!?]+$/, "");
 }
 
 function inferNarratorDescription(text) {
@@ -65,6 +75,20 @@ function inferNarratorDescription(text) {
   return "the same ordinary adult narrator/protagonist";
 }
 
+function defaultCharacterProfile(text) {
+  const protagonist = inferNarratorDescription(text);
+  if (/\bteacher|student|school|classroom\b/i.test(text)) {
+    return `${protagonist}: realistic everyday clothing, consistent face, consistent hair, same age, same outfit colors, calm expressive body language.`;
+  }
+  if (/\bretail|cashier|customer|store|pharmacy|bookstore|grocery\b/i.test(text)) {
+    return `${protagonist}: realistic everyday clothing, consistent face, consistent hair, same age, visible work or casual outfit repeated in every image.`;
+  }
+  if (/\bhotel|nurse|warehouse|security|janitor|night shift|overnight\b/i.test(text)) {
+    return `${protagonist}: tired night-shift worker, consistent face, consistent hair, same uniform or practical dark clothing, same age in every image.`;
+  }
+  return `${protagonist}: realistic everyday person, consistent face, consistent hair, same age, same outfit and color palette across all images.`;
+}
+
 function inferMainSetting(text) {
   const source = String(text || "").toLowerCase();
   if (source.includes("therapist") || source.includes("therapy")) return "a therapist office and quiet personal memory scenes";
@@ -80,10 +104,10 @@ function inferMainSetting(text) {
   return "a believable real-world setting from the story";
 }
 
-function storyVisualBible({ script, title, style }) {
+function storyVisualBible({ script, title, style, characterBible, settingBible }) {
   const combined = `${title || ""}. ${script || ""}`;
-  const protagonist = inferNarratorDescription(combined);
-  const setting = inferMainSetting(combined);
+  const character = promptNote(characterBible) || defaultCharacterProfile(combined);
+  const setting = promptNote(settingBible) || inferMainSetting(combined);
   const palette =
     style === "horror"
       ? "muted dark colors with tense shadows"
@@ -92,47 +116,41 @@ function storyVisualBible({ script, title, style }) {
         : "consistent warm natural colors";
 
   return [
-    `Character continuity: show ${protagonist} in every panel unless the scene clearly requires another person.`,
-    "Keep the protagonist's hair, outfit, age, and face consistent across all panels.",
-    `Main setting: ${setting}.`,
+    `Character Bible: ${character}`,
+    "Character continuity: reuse the same protagonist design in every generated image. Same face, hair, age, outfit, body type, and color palette. If another person appears, keep them secondary unless the story specifically focuses on them.",
+    `Setting Bible: ${setting}`,
+    "Scenario continuity: keep the same room, props, time of day, lighting, and camera language whenever the story stays in the same place. Only change location when the selected sentence clearly moves somewhere else.",
     `Visual continuity: ${palette}, same camera language, same illustration style for the whole video.`,
-    "Each image must be one coherent scene, not a collage, not a map, not a page of many panels."
+    "Single-image rule: each generated image is one continuous camera shot in one location at one moment. It must look like one poster or film still, never a comic page, never multiple panels, never speech bubbles."
   ].join(" ");
 }
 
-export function createScenePrompts({ script, title, panelCount, style }) {
+export function createScenePrompts({ script, title, panelCount, style, characterBible, settingBible }) {
   const sentences = sceneSentences(script);
   const count = Math.max(2, Math.min(24, Number(panelCount) || 8));
   const baseStyle = stylePrompts[style] || stylePrompts.comic;
+  const styleLabel = style === "comic" ? "inked story illustration" : style || "inked story illustration";
   const storyTitle = String(title || "Reddit story").replace(/\s+/g, " ").trim();
-  const visualBible = storyVisualBible({ script, title, style });
-  const styleLock = `Use this same visual style for every panel: ${style || "comic"}. ${visualBible}`;
+  const visualBible = storyVisualBible({ script, title, style, characterBible, settingBible });
+  const styleLock = `Continuity lock for the whole video. Use this exact same visual style for every generated image: ${styleLabel}. ${visualBible}`;
 
   if (!sentences.length) {
     return Array.from({ length: count }, (_item, index) => ({
       scene: `A dramatic moment from the story, scene ${index + 1}.`,
-      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Scene ${index + 1}: show the protagonist reacting to a dramatic moment from the story as one cinematic scene.`
+      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Panel ${index + 1}: show the same protagonist reacting to one dramatic moment from the story. Make exactly one full-screen illustration, one location, one main action, one clear foreground subject, no borders, no page layout, no speech bubbles.`
     }));
   }
 
-  const chunkSize = Math.max(1, Math.ceil(sentences.length / count));
-  const chunks = [];
-  for (let i = 0; i < sentences.length && chunks.length < count; i += chunkSize) {
-    chunks.push(sentences.slice(i, i + chunkSize).join(" "));
-  }
+  const selectedScenes = Array.from({ length: count }, (_item, index) => {
+    const sceneIndex = Math.min(sentences.length - 1, Math.floor((index * sentences.length) / count));
+    return sentences[sceneIndex];
+  });
 
-  while (chunks.length < count) {
-    chunks.push(sentences[chunks.length % sentences.length]);
-  }
-
-  return chunks.slice(0, count).map((scene) => {
-    const trimmedScene = compactText(scene, 420);
+  return selectedScenes.map((scene) => {
+    const trimmedScene = singleSceneFocus(scene);
     return {
       scene: trimmedScene,
-      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Story context: ${compactText(
-        script,
-        650
-      )}. Illustrate this exact moment as one cinematic scene with the same protagonist acting or reacting: ${trimmedScene}`
+      prompt: `${baseStyle}. ${styleLock} Reddit thread title: ${storyTitle}. Current panel moment: ${trimmedScene}. Illustrate only this one moment with the same protagonist design and setting rules from the continuity lock. Make exactly one full-screen illustration like a single movie still: one room or location, one main action, one clear foreground subject, single camera angle. No borders. No gutters. No page layout. No speech bubbles. Do not summarize the whole story. Do not show multiple moments, multiple rooms, multiple panels, frames, documents, or a collage.`
     };
   });
 }
@@ -142,7 +160,11 @@ async function imageLooksUsable(filePath) {
   return Boolean(stats && stats.size > 20_000);
 }
 
-async function downloadImage(url, outputPath) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function downloadImageOnce(url, outputPath) {
   const response = await fetch(url, {
     headers: {
       "User-Agent": "reddit-video-maker/1.0"
@@ -169,6 +191,21 @@ async function downloadImage(url, outputPath) {
   await fs.writeFile(outputPath, bytes);
 }
 
+async function downloadImage(url, outputPath, attempts = 4) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await downloadImageOnce(url, outputPath);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) break;
+      await sleep(1500 * attempt);
+    }
+  }
+  throw lastError;
+}
+
 export async function generatePollinationsPanels({ prompts, outputDir, layout, onProgress }) {
   await fs.mkdir(outputDir, { recursive: true });
   const isYoutube = layout === "youtube";
@@ -184,7 +221,7 @@ export async function generatePollinationsPanels({ prompts, outputDir, layout, o
     await downloadImage(url, outputPath);
     if (!(await imageLooksUsable(outputPath))) {
       const retryPrompt = encodeURIComponent(
-        `${item.prompt}. Regenerate as a clear single scene focused on the same protagonist, no collage, no map, no document wall.`
+        `${item.prompt}. Regenerate as exactly one full-screen illustration: one scene, one location, one main character/action, no comic page, no panel grid, no borders, no speech bubbles, no collage, no split-screen, no storyboard, no map, no document wall.`
       );
       const retryUrl = `https://image.pollinations.ai/prompt/${retryPrompt}?width=${width}&height=${height}&seed=${seed + 101}&nologo=true`;
       await downloadImage(retryUrl, outputPath);
@@ -353,7 +390,7 @@ export async function generateComfyPanels({
     await saveComfyImage({ baseUrl, image, outputPath });
     if (!(await imageLooksUsable(outputPath))) {
       const retryWorkflow = comfyWorkflow({
-        prompt: `${item.prompt}. Regenerate as a clear single scene focused on the same protagonist, no collage, no map, no document wall.`,
+        prompt: `${item.prompt}. Regenerate as exactly one full-screen illustration: one scene, one location, one main character/action, no comic page, no panel grid, no borders, no speech bubbles, no collage, no split-screen, no storyboard, no map, no document wall.`,
         checkpoint: selectedCheckpoint,
         seed: Math.floor(Math.random() * 1_000_000_000),
         width,

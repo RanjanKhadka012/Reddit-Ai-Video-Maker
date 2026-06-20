@@ -10,11 +10,13 @@ export const dataRoot = process.env.RVM_DATA_DIR
 
 export const backgroundsDir = path.join(dataRoot, "backgrounds");
 export const comicPanelsDir = path.join(dataRoot, "comic-panels");
+export const piperVoicesDir = path.join(dataRoot, "piper-voices");
 export const rendersDir = path.join(dataRoot, "renders");
 export const distDir = path.join(appRoot, "dist");
 
 export function ensureDataDirs() {
   fs.mkdirSync(backgroundsDir, { recursive: true });
   fs.mkdirSync(comicPanelsDir, { recursive: true });
+  fs.mkdirSync(piperVoicesDir, { recursive: true });
   fs.mkdirSync(rendersDir, { recursive: true });
 }

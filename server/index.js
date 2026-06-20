@@ -198,6 +198,8 @@ app.post("/api/render", async (request, response, next) => {
       panelSource,
       imageStyle,
       panelCount,
+      characterBible,
+      settingBible,
       comfyUrl,
       comfyCheckpoint,
       comfySteps,
@@ -269,6 +271,8 @@ app.post("/api/render", async (request, response, next) => {
       panelSource,
       imageStyle,
       panelCount,
+      characterBible,
+      settingBible,
       comfyUrl,
       comfyCheckpoint,
       comfySteps,
@@ -306,6 +310,8 @@ async function runRenderJob({
   panelSource,
   imageStyle,
   panelCount,
+  characterBible,
+  settingBible,
   comfyUrl,
   comfyCheckpoint,
   comfySteps,
@@ -364,7 +370,9 @@ async function runRenderJob({
           script,
           title: story.title,
           panelCount: Math.max(2, Math.min(24, Number(panelCount) || 8)),
-          style: imageStyle || "comic"
+          style: imageStyle || "comic",
+          characterBible,
+          settingBible
         });
         const generatedDir = path.join(jobDir, "generated-panels");
         const generatorProgress = (value) => {
